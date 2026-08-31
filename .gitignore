@@ -1,0 +1,23 @@
+# Dependencies and generated reports
+node_modules/
+coverage/
+*.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.devpost-hackathon-state.json
+
+# Local agent and browser workspaces
+.gstack/
+.hallmark/
+.playwright-mcp/
+.codex/
+AGENTS.md
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
