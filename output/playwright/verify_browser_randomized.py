@@ -51,7 +51,19 @@ def main():
             page.wait_for_timeout(50)
             vertical_fit = page.evaluate("() => ({scroll: document.documentElement.scrollHeight, client: document.documentElement.clientHeight})")
             assert vertical_fit["scroll"] <= vertical_fit["client"], f"vertical page scroll at {width}x{height}: {vertical_fit}"
+            kitchen_clearance = page.evaluate("""() => {
+              const tables = [...document.querySelectorAll('.table-node')];
+              const rule = document.querySelector('.room-rule--south').getBoundingClientRect();
+              const label = document.querySelector('.zone-label--kitchen').getBoundingClientRect();
+              return {
+                tableBottom: Math.max(...tables.map(table => table.getBoundingClientRect().bottom)),
+                passTop: Math.min(rule.top, label.top)
+              };
+            }""")
+            assert kitchen_clearance["tableBottom"] + 4 <= kitchen_clearance["passTop"], \
+                f"kitchen pass overlap at {width}x{height}: {kitchen_clearance}"
         results.append("1024x768, 1280x800, and 1440x900 desktop layouts fit without page scroll")
+        results.append("south tables keep a clear lane above the kitchen pass")
 
         initial_at = page.locator(".clock-readout time").inner_text()
         page.wait_for_timeout(1100)

@@ -2401,7 +2401,7 @@ svg {
     grid-auto-rows: minmax(var(--space-table-row-min), 1fr);
     grid-template-rows: repeat(8, minmax(var(--space-table-row-min), 1fr));
     min-height: 0;
-    padding: var(--space-lg) var(--space-sm) var(--space-md);
+    padding: var(--space-lg) var(--space-sm) var(--space-xl);
   }
 
   .floor-heading {
