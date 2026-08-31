@@ -21,11 +21,14 @@ import {
 } from "../src/engine.js";
 import { EXPECTED_DWELL_MINUTES, PARTY_SIZE_DISTRIBUTION, PREFERENCE_KEYS, RESTAURANT_CAPACITY, SERVICE_START, TABLE_DEFINITIONS, TABLE_UNIT_COUNT } from "../src/data.js";
 
-test("the expanded restaurant inventory is exactly 100 seats", () => {
-  assert.equal(RESTAURANT_CAPACITY, 100);
-  assert.equal(TABLE_UNIT_COUNT, 27);
-  assert.equal(TABLE_DEFINITIONS.reduce((total, table) => total + table.seats, 0), 100);
-  assert.deepEqual(["V6", "B5", "S6"].map((id) => TABLE_DEFINITIONS.some((table) => table.id === id)), [true, true, true]);
+test("the expanded restaurant inventory is exactly 120 seats", () => {
+  assert.equal(RESTAURANT_CAPACITY, 120);
+  assert.equal(TABLE_UNIT_COUNT, 33);
+  assert.equal(TABLE_DEFINITIONS.reduce((total, table) => total + table.seats, 0), 120);
+  assert.deepEqual(
+    ["D1", "D2", "D3", "D4", "D5", "D6"].map((id) => TABLE_DEFINITIONS.some((table) => table.id === id)),
+    [true, true, true, true, true, true]
+  );
 });
 
 test("service waits at 5:45 PM until Start is pressed", () => {

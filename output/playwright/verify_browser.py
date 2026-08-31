@@ -28,9 +28,9 @@ def main():
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_selector(".floor-map")
         assert page.title() == "Host Stand · The Steak House"
-        assert page.locator(".table-node").count() == 27
+        assert page.locator(".table-node").count() == 33
         assert page.locator(".party-row").count() >= 8
-        assert "100 seats · 27 table units" in page.locator(".brand-lockup").inner_text()
+        assert "120 seats · 33 table units" in page.locator(".brand-lockup").inner_text()
         first_upcoming = page.locator('.party-row').first
         first_party_id = first_upcoming.get_attribute("data-party-id")
         first_party_name = first_upcoming.locator(".party-name").inner_text()
@@ -43,7 +43,7 @@ def main():
         first_party_height = page.locator(f'.party-row[data-party-id="{first_party_id}"]').bounding_box()["height"]
         assert first_party_height <= 100, f"upcoming party row is not compact: {first_party_height}px"
         page.screenshot(path=str(OUTPUT / "initial-desktop.png"), full_page=True)
-        results.append("initial floor renders 27 named table units totaling exactly 100 seats")
+        results.append("initial floor renders 33 named table units totaling exactly 120 seats")
         results.append("upcoming reservations show previewable live table suggestions without seating early")
         results.append("reservation and walk-in cards use a compact two-line layout")
 
@@ -120,8 +120,8 @@ def main():
         tool_count = page.evaluate("window.__HOST_STAND_TOOLS__.length")
         floor = page.evaluate("""async () => window.hostStandInvokeTool('get_floor', {})""")
         assert tool_count == 20
-        assert len(floor["tables"]) == 27
-        assert floor["capacity"] == 100
+        assert len(floor["tables"]) == 33
+        assert floor["capacity"] == 120
         assigned_table = next(table for table in floor["tables"] if table["id"] == agent_result["tableId"])
         assert assigned_table["expectedFinishAt"] == floor["minute"] + 90
         assert floor["controllerMode"] == "external"

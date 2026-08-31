@@ -2,7 +2,7 @@
 
 Host Stand is a one-screen restaurant service simulator built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/). A human host and a browser agent share the same floor, queues, clock, hard constraints, optimizer, and action history.
 
-The simulated dining room has exactly **100 seats across 27 table units**.
+The simulated dining room has exactly **120 seats across 33 table units**.
 
 The demo restaurant is **The Steak House**. All guests and service events are synthetic.
 
@@ -116,7 +116,7 @@ Browser verification artifacts live in `output/playwright/`. The canonical rando
 - Built-in Local optimizer behavior is a deterministic scoring algorithm. It does not call an LLM. An external AI agent can explicitly take ownership with `attach_agent`, inspect and operate the same state through WebMCP, and remain attached across random New runs.
 - Local and external automation share the same reservation-first commit guard. Candidate plans remain visible for walk-ins, but automation cannot assign or hold a table for one while an unassigned waiting reservation has a legal table available. Human drag-and-drop or select-party-then-table is the explicit override: it locks the plan for an upcoming reservation and commits immediately for an arrived party.
 - A conservative 90-minute occupancy assumption produces deterministic expected finish times for every seated party.
-- Capacity and utilization are derived from the table inventory. The expanded room totals exactly 100 seats across 27 units, including the new V6, B5, and S6 tables.
+- Capacity and utilization are derived from the table inventory. The expanded room totals exactly 120 seats across 33 units, including a flexible six-table dining section with four 4-tops and two 2-tops.
 - This is a demo, not a production reservation, POS, or guest-messaging system.
 
 ## License

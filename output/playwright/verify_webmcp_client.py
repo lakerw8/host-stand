@@ -135,8 +135,8 @@ def main():
         assert result["names"] == sorted(result["names"])
         assert result["allSchemasAreObjects"] is True
         assert result["readOnlyCount"] == 3
-        assert result["initialTables"] == 27
-        assert result["initialCapacity"] == 100
+        assert result["initialTables"] == 33
+        assert result["initialCapacity"] == 120
         assert result["attached"]["ok"] is True
         assert result["queueParty"]["status"] == "upcoming"
         assert result["scoredLegal"] is True
@@ -204,8 +204,8 @@ def main():
         assert native_result["count"] == 20
         assert native_result["names"] == sorted(native_result["names"])
         assert native_result["readOnlyCount"] == 3
-        assert native_result["tables"] == 27
-        assert native_result["capacity"] == 100
+        assert native_result["tables"] == 33
+        assert native_result["capacity"] == 120
         assert native_result["attached"]["ok"] is True
         assert native_result["assignment"]["seated"] is True
         assert native_result["assignedTable"]["partyId"] == native_result["partyId"]

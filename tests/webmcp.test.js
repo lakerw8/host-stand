@@ -60,9 +60,9 @@ test("an external agent can plan, mutate, verify, and recover through tools only
   const { execute, state } = harness;
 
   const initialFloor = await execute("get_floor");
-  assert.equal(initialFloor.tables.length, 27);
-  assert.equal(initialFloor.capacity, 100);
-  assert.equal(initialFloor.tableUnitCount, 27);
+  assert.equal(initialFloor.tables.length, 33);
+  assert.equal(initialFloor.capacity, 120);
+  assert.equal(initialFloor.tableUnitCount, 33);
   assert.equal(initialFloor.clock, "5:45 PM");
   assert.equal(initialFloor.agentCadence.heartbeatMinutes, 10);
   assert.equal(initialFloor.agentCadence.planningHorizonMinutes, 45);

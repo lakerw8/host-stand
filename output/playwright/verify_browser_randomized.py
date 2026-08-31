@@ -29,8 +29,8 @@ def main():
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_selector(".floor-map")
         assert page.title() == "Host Stand · The Steak House"
-        assert page.locator(".table-node").count() == 27
-        assert "100 seats · 27 table units" in page.locator(".brand-lockup").inner_text()
+        assert page.locator(".table-node").count() == 33
+        assert "120 seats · 33 table units" in page.locator(".brand-lockup").inner_text()
         assert page.locator(".party-row").count() >= 8
         party_heights = page.locator(".party-row").evaluate_all("rows => rows.map(row => row.getBoundingClientRect().height)")
         assert max(party_heights) <= 100, party_heights
@@ -44,7 +44,7 @@ def main():
         assert viewport_fit["pageHeight"] <= viewport_fit["viewportHeight"], viewport_fit
         assert viewport_fit["floorHeight"] <= 482, viewport_fit
         assert viewport_fit["tableHeight"] <= 52, viewport_fit
-        results.append("randomized floor fits 27 compact table units and one mixed-source queue without page scroll")
+        results.append("randomized floor fits 33 compact table units and one mixed-source queue without page scroll")
 
         for width, height in ((1024, 768), (1280, 800), (1440, 900)):
             page.set_viewport_size({"width": width, "height": height})
@@ -62,7 +62,21 @@ def main():
             }""")
             assert kitchen_clearance["tableBottom"] + 4 <= kitchen_clearance["passTop"], \
                 f"kitchen pass overlap at {width}x{height}: {kitchen_clearance}"
+            collisions = page.evaluate("""() => {
+              const tables = [...document.querySelectorAll('.table-node')].map(table => ({
+                id: table.dataset.tableId,
+                rect: table.getBoundingClientRect()
+              }));
+              return tables.flatMap((left, index) => tables.slice(index + 1).flatMap(right => {
+                if (!left.id.startsWith('D') && !right.id.startsWith('D')) return [];
+                const overlapX = Math.min(left.rect.right, right.rect.right) - Math.max(left.rect.left, right.rect.left);
+                const overlapY = Math.min(left.rect.bottom, right.rect.bottom) - Math.max(left.rect.top, right.rect.top);
+                return overlapX > 1 && overlapY > 1 ? [`${left.id}/${right.id}`] : [];
+              }));
+            }""")
+            assert collisions == [], f"table overlap at {width}x{height}: {collisions}"
         results.append("1024x768, 1280x800, and 1440x900 desktop layouts fit without page scroll")
+        results.append("all six new dining units remain clear of neighboring tables at every desktop test size")
         results.append("south tables keep a clear lane above the kitchen pass")
 
         initial_at = page.locator(".clock-readout time").inner_text()
@@ -198,8 +212,13 @@ def main():
           return null;
         }""", waiting_party_id)
         assert legal_table_id is not None
-        waiting_party.drag_to(page.locator(f'.table-node[data-table-id="{legal_table_id}"]'))
-        assert waiting_name in page.locator(f'.table-node[data-table-id="{legal_table_id}"]').inner_text()
+        legal_table = page.locator(f'.table-node[data-table-id="{legal_table_id}"]')
+        for _ in range(2):
+            page.locator(f'.party-row[data-party-id="{waiting_party_id}"]').drag_to(legal_table, force=True)
+            if waiting_name in legal_table.inner_text():
+                break
+            page.wait_for_timeout(50)
+        assert waiting_name in legal_table.inner_text()
         results.append("manual mode waits for a real arrival and seats it through drag-and-drop")
 
         page.locator(".reset-control").click()

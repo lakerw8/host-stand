@@ -6,7 +6,7 @@
 
 **Project name:** Host Stand (locked).
 
-**Restaurant name:** The Steak House (locked). Fancy 100-seat room with a window wall. Not the submission title.
+**Restaurant name:** The Steak House (locked). Fancy 120-seat room with a window wall. Not the submission title.
 
 ---
 
@@ -45,7 +45,7 @@ They share one page. The agent is not a sidebar that prints table numbers as tex
 
 ## 4. The restaurant: The Steak House
 
-The Steak House. One room, top-down, exactly 100 seats across 27 assignable units. North wall is windows (view). South wall is the kitchen pass. West is the bar counter. East has two private rooms.
+The Steak House. One room, top-down, exactly 120 seats across 33 assignable units. North wall is windows (view). South wall is the kitchen pass. West is the bar counter. East has two private rooms.
 
 ### 4.1 Table inventory
 
@@ -59,6 +59,12 @@ Every table has: `id`, `seats` (hard max), `min_seats` (soft: wasting a big tabl
 | V4 | 4 | square | view | n | n | y | |
 | V5 | 6 | round | view | n | n | y | window round |
 | V6 | 4 | square | view | n | n | y | window 4-top |
+| D1 | 4 | square | interior | n | n | y | north dining row |
+| D2 | 2 | square | interior | n | n | y | flexible 2-top |
+| D3 | 2 | square | interior | n | n | y | accessible flexible 2-top |
+| D4 | 4 | square | interior | n | n | y | north dining row |
+| D5 | 4 | square | interior | n | n | y | east dining row |
+| D6 | 4 | square | interior | n | n | y | east dining row |
 | B1 | 4 | booth | interior | y | n | y | |
 | B2 | 4 | booth | interior | y | n | y | |
 | B3 | 4 | booth | interior | y | n | n | tight booth, no high chair |
@@ -104,7 +110,7 @@ Maximize, every re-solve:
 - Do not put a 2-top on an 8 (size waste).
 - Kitchen-adjacent tables should turn faster (shorter dwell draw) and are the right dump for parties with no view/quiet pref.
 - Empty private rooms during a 6:30 crush while a 5-top waits is a miss unless a hold is live.
-- Utilization: seated_seats / 100, sampled each tick.
+- Utilization: seated_seats / 120, sampled each tick.
 
 Host slider: **Sat ↔ Turn**. Moving it changes agent behavior live. That slider is a WebMCP tool too (`set_weights`).
 
@@ -259,7 +265,7 @@ These are the demo’s “how well this works” chart. When the host drags the 
 
 ## 11. Three-minute demo script
 
-1. **0:00–0:20** Start from a fresh paused run. Name the random run code, 100-seat floor, 45-minute horizon, and visible tentative plans.
+1. **0:00–0:20** Start from a fresh paused run. Name the random run code, 120-seat floor, 45-minute horizon, and visible tentative plans.
 2. **0:20–0:45** Press Start and 5x. Use next-event once or twice so the first parties arrive and the agent begins committing planned tables.
 3. **0:45–1:15** Click a non-primary candidate on an upcoming party. The chip becomes **HOST**; when that party arrives, the host plan commits and the movement animation lands on the chosen table.
 4. **1:15–1:45** Toggle to **Manual floor**, jump to a walk-in, and drag the waiting row onto a legal table. No automatic candidates or assignments appear while manual mode is active.
@@ -305,4 +311,4 @@ Combinable 4-tops are a known host move. If v1 needs one “wow,” allow **one*
 
 ## 15. Build note
 
-The testable MVP is implemented as a browser-native simulation with manual and agent-assisted modes, a 100-seat randomized floor, and a functional WebMCP tool surface. Continue iterating against this document as host feedback is incorporated.
+The testable MVP is implemented as a browser-native simulation with manual and agent-assisted modes, a 120-seat randomized floor, and a functional WebMCP tool surface. Continue iterating against this document as host feedback is incorporated.
