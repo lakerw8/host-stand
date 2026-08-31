@@ -136,12 +136,44 @@ const PARTY_NAME_POOL = [
   "Santos", "Thompson", "Usman", "Vega", "Williams", "Xu", "Young"
 ];
 
-const PARTY_SIZE_POOL = [1, 2, 2, 2, 3, 4, 4, 4, 5, 6, 6, 8];
+export const PARTY_SIZE_DISTRIBUTION = Object.freeze([
+  Object.freeze({ size: 1, weight: 6 }),
+  Object.freeze({ size: 2, weight: 48 }),
+  Object.freeze({ size: 3, weight: 10 }),
+  Object.freeze({ size: 4, weight: 24 }),
+  Object.freeze({ size: 5, weight: 4 }),
+  Object.freeze({ size: 6, weight: 5 }),
+  Object.freeze({ size: 8, weight: 3 })
+]);
 const OCCASION_POOL = ["", "", "", "Anniversary", "Birthday", "Business dinner", "First visit"];
 
 const randomInt = (random, minimum, maximum) => minimum + Math.floor(random() * (maximum - minimum + 1));
 const randomFrom = (random, values) => values[Math.floor(random() * values.length)];
 const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+function normalizedPartySizeRoster(partyCount, random) {
+  const allocations = PARTY_SIZE_DISTRIBUTION.map(({ size, weight }) => {
+    const exactCount = partyCount * weight / 100;
+    return {
+      size,
+      count: Math.floor(exactCount),
+      remainder: exactCount - Math.floor(exactCount),
+      tieBreaker: random()
+    };
+  });
+  const assignedCount = allocations.reduce((total, allocation) => total + allocation.count, 0);
+  const remainingCount = partyCount - assignedCount;
+
+  allocations
+    .sort((left, right) => right.remainder - left.remainder || left.tieBreaker - right.tieBreaker)
+    .slice(0, remainingCount)
+    .forEach((allocation) => { allocation.count += 1; });
+
+  return shuffle(
+    allocations.flatMap(({ size, count }) => Array(count).fill(size)),
+    random
+  );
+}
 
 function groupScenarioEvents(events) {
   const grouped = new Map();
@@ -171,6 +203,7 @@ export function createRandomNightScenario(seed = `night-${Date.now()}`) {
   const partyCount = randomInt(random, 20, 28);
   const reservationCount = Math.min(partyCount - 7, randomInt(random, 12, 17));
   const names = shuffle(PARTY_NAME_POOL, random).slice(0, partyCount);
+  const partySizes = normalizedPartySizeRoster(partyCount, random);
   const preferenceCounts = shuffle(Array.from({ length: partyCount }, (_, index) => index % 4), random);
   const reservationSlots = shuffle(
     Array.from({ length: 34 }, (_, index) => FIRST_SEATING + index * 5),
@@ -191,7 +224,7 @@ export function createRandomNightScenario(seed = `night-${Date.now()}`) {
 
   const parties = names.map((name, index) => {
     const source = sourceOrder[index];
-    const size = randomFrom(random, PARTY_SIZE_POOL);
+    const size = partySizes[index];
     const preferences = shuffle(PREFERENCE_KEYS, random).slice(0, preferenceCounts[index]);
     const reservedFor = source === "reservation" ? reservationSlots[reservationIndex++] : null;
     const arrivedAt = source === "walk_in" ? walkInSlots[walkInIndex++] : null;

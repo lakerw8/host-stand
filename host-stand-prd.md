@@ -136,7 +136,7 @@ One compact operational queue on the **left rail**, beside the table floor. Rese
 
 Clock starts **5:45pm** and each new run creates a different service scenario. The run code makes any generated night reproducible for debugging without making the demo deterministic.
 
-- Generate 20–28 named parties with a randomized reservation/walk-in mix, party sizes, service timing, lateness, no-shows, regulars, children, and accessibility needs.
+- Generate 20–28 named parties with a randomized reservation/walk-in mix, service timing, lateness, no-shows, regulars, children, and accessibility needs. Normalize party sizes within each run to a real-service target: 1 (6%), 2 (48%), 3 (10%), 4 (24%), 5 (4%), 6 (5%), and 8 (3%). This keeps 72% of parties at 2 or 4 seats, with an occasional 12% at 5+.
 - Every party receives zero to three unique random preferences. Each generated night covers the full zero-through-three range.
 - Every run includes at least one high-chair constraint and one accessibility constraint so the allocator must solve hard cases.
 - Walk-ins arrive throughout service with noisy peaks; reservations may arrive on time, late, or no-show.
@@ -178,7 +178,7 @@ The agent maintains a rolling plan. It performs a full-floor review every **10 r
    - `set_candidates` so the rail shows e.g. “V3 · V4 · S1” with #1 marked.
    - Preserve the previous #1 candidate when it remains legal and a new option does not improve the plan materially. Inside T−5, keep it fixed unless it becomes impractical or illegal.
    - Known reservations execute the stable #1 table when they actually arrive. A walk-in discovered at arrival gets a five-minute host-override window.
-3. If the host **taps a candidate for an upcoming reservation**, promote it to a hard host plan. If the host taps a waiting-party candidate or **drags onto any legal table**, commit immediately. Host decisions always beat agent ranking.
+3. With an agent active, if the host taps a candidate, selects the party and then a table, or **drags an upcoming reservation onto a legal table**, promote it to a hard host plan. The same gestures on an arrived party commit immediately. In Manual floor, future reservations remain inactive until arrival. Host decisions always beat agent ranking.
 4. If the host **does nothing** until arrival/deadline → commit the #1 candidate. Before an automated walk-in commit or hold, check for an unassigned waiting reservation with any legal available table. If one exists, keep the walk-in plan visible and return `RESERVATION_PRIORITY` until the reservation is handled. No popup. No pause.
 5. Publish `explain_plan` (candidate sets + last commits).
 
@@ -192,7 +192,7 @@ The Walsh-vs-Okonkwo moment: Okonkwo’s candidates include P1 (and maybe R2). W
 
 One screen. No settings maze.
 
-**Center / left — floor.** Top-down The Steak House. Tables drawn as their shapes. Color: free (open), held (stripe), seated (filled + remaining band), dirty (hash), locked (padlock). Hover: seats, zone, prefs that match. Candidate tables pulse on the floor while a party is highlighted. Drag a waiting party onto a table, or tap a chip = host override (fires `assign_table` with `source: host`).
+**Center / left — floor.** Top-down The Steak House. Tables drawn as their shapes. Color: free (open), held (stripe), seated (filled + remaining band), dirty (hash), locked (padlock). Hover: seats, zone, prefs that match. Candidate tables pulse on the floor while a party is highlighted. With an agent active, drag an upcoming reservation onto a table or select the party and then the table to lock a host plan; use the same gestures on a waiting party to commit immediately. Manual mode enables those controls at arrival. The rail and inspector state the result before the host acts and show `HOST` after an override.
 
 **Left rail — Upcoming parties.** Reservations and arrived walk-ins appear together in one priority-ordered list. A dark `RES` badge, cobalt `WALK-IN` badge, and compact `Reservation first / Walk-in after` key make the source and policy readable without separate panels. Each row shows time, name, size, preference chips, **candidate tables** as tappable chips, and planning/wait state. Aging waiting rows go amber at 15 minutes and red at 30. The rail preserves its visible-party anchor when events add or update rows, so live service never snaps the host back to the top.
 

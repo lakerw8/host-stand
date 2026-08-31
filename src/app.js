@@ -243,6 +243,33 @@ function runHostAssignment(partyId, tableId) {
   return result;
 }
 
+function hostActionForParty(party) {
+  if (party?.status === "waiting") return "seat";
+  if (party?.status === "upcoming" && party.source === "reservation" && state.controllerMode !== "manual") return "plan";
+  return null;
+}
+
+function runHostTableAction(partyId, tableId) {
+  const party = getParty(state, partyId);
+  const hostAction = hostActionForParty(party);
+  if (hostAction === "seat") return runHostAssignment(partyId, tableId);
+  if (hostAction !== "plan") {
+    const result = { ok: false, error: { message: "This party can be assigned after it arrives." } };
+    showFeedback(result.error.message);
+    return result;
+  }
+
+  const result = setHostCandidateOverride(state, partyId, tableId);
+  if (!result.ok) {
+    showFeedback(result.error.message);
+  } else {
+    feedback = null;
+    selectedPartyId = partyId;
+    selectedTableId = null;
+  }
+  return result;
+}
+
 function sparklinePath(values) {
   if (!values.length) return "M 0 15 L 72 15";
   const points = values.slice(-8);
@@ -325,7 +352,7 @@ function candidateButtons(party) {
     return `<span class="assignment-state assignment-state--committed">${icon("check")} ${escapeHtml(party.committedTableId)}</span>`;
   }
   if (party.status === "upcoming") {
-    if (state.controllerMode === "manual") return '<span class="candidate-empty">Manual · plan at check-in</span>';
+    if (state.controllerMode === "manual") return '<span class="candidate-empty">Manual · assign at arrival</span>';
     const insideHorizon = party.reservedFor <= state.now + AGENT_PLANNING_HORIZON_MINUTES;
     if (!insideHorizon) return `<span class="candidate-empty">Agent watches at T−${AGENT_PLANNING_HORIZON_MINUTES}</span>`;
     if (!party.candidateTableIds.length) return `<span class="candidate-empty">${state.controllerMode === "external" ? "Waiting for agent…" : "Reviewing floor…"}</span>`;
@@ -361,10 +388,10 @@ function candidateButtons(party) {
 
 function candidateStateLabel(party) {
   if (party.committedTableId) return "Committed";
-  if (party.hostOverrideTableId) return "Host plan";
+  if (party.hostOverrideTableId) return "Host override";
   if (getReservationPriorityBlocker(state, party)) return "After reservation";
-  if (party.candidateState === "tentative") return party.candidateFrozen ? "Tentative · locked" : "Tentative";
-  return party.status === "waiting" ? "Suggested" : "Potential";
+  if (party.candidateState === "tentative") return party.candidateFrozen ? "Agent plan · locked" : "Agent plan";
+  return party.status === "waiting" ? "Seat now" : "Potential";
 }
 
 function partyTiming(party) {
@@ -419,15 +446,18 @@ function restoreQueueViewport(viewport) {
 
 function renderParty(party) {
   const waiting = party.status === "waiting";
+  const hostAction = hostActionForParty(party);
+  const actionable = Boolean(hostAction);
   const origin = party.source === "walk_in" ? party.arrivedAt : party.reservedFor;
   const waited = waiting ? Math.max(0, state.now - origin) : 0;
   const aging = waited >= 30 ? "is-overdue" : waited >= 15 ? "is-aging" : "";
   const selected = party.id === selectedPartyId;
   return `
     <article
-      class="party-row party-row--${party.source === "reservation" ? "reservation" : "walk-in"} ${aging} ${selected ? "is-selected" : ""} ${waiting ? "is-draggable" : ""}"
-      ${waiting ? 'draggable="true"' : ""}
+      class="party-row party-row--${party.source === "reservation" ? "reservation" : "walk-in"} ${aging} ${selected ? "is-selected" : ""} ${actionable ? "is-draggable" : ""} ${party.hostOverrideTableId ? "has-host-override" : ""}"
+      ${actionable ? 'draggable="true"' : ""}
       data-party-id="${party.id}"
+      data-host-action="${hostAction || "none"}"
     >
       <div class="party-row__top">
         <button
@@ -437,7 +467,8 @@ function renderParty(party) {
           data-party-id="${party.id}"
           data-focus-key="party-${party.id}"
           aria-pressed="${selected}"
-          ${waiting ? "" : "disabled"}
+          aria-label="${escapeHtml(`${party.name}, party of ${party.size}. ${hostAction === "plan" ? "Select to override the agent plan." : hostAction === "seat" ? "Select to seat now." : "Assignment opens at arrival."}`)}"
+          ${actionable ? "" : "disabled"}
         >
           <span class="party-time">
             <span>${minutesToTime(partyQueueMinute(party)).replace(" PM", "")}</span>
@@ -506,21 +537,42 @@ function renderInspector(activeParty) {
     `;
   }
   if (activeParty) {
+    const hostAction = hostActionForParty(activeParty);
+    const constraint = activeParty.children
+      ? `${activeParty.children} ${activeParty.children === 1 ? "child" : "children"} · high chair required`
+      : activeParty.needsAccessible ? "Accessible table required" : "";
+    const operation = hostAction === "plan"
+      ? activeParty.hostOverrideTableId
+        ? `Upcoming reservation · ${activeParty.hostOverrideTableId} is the host's locked plan`
+        : "Upcoming reservation · agent plan can be overridden now"
+      : hostAction === "seat"
+        ? "Party has arrived · assign a table now"
+        : "Upcoming reservation · manual assignment opens at arrival";
+    const instruction = hostAction === "plan"
+      ? activeParty.hostOverrideTableId
+        ? `Host override active · ${activeParty.hostOverrideTableId} is locked until arrival. Drag, tap a chip, or select another table to change it.`
+        : "Override agent: drag → table, tap a table chip, or select party → table."
+      : hostAction === "seat"
+        ? "Seat now: drag row → table, tap a candidate, or select party → table."
+        : "Manual mode waits for check-in; then drag row → table or select party → table.";
     return `
       <aside class="inspector" aria-label="Selected party details">
         <div>
           <strong>${escapeHtml(activeParty.name)} · party of ${activeParty.size}</strong>
-          <span>${activeParty.children ? `${activeParty.children} children · high chair required` : "Select a candidate or any legal table"}</span>
+          <span>${escapeHtml([operation, constraint].filter(Boolean).join(" · "))}</span>
         </div>
-        <div class="inspector__state">Drag the row, tap a candidate, or tap a table on the floor.</div>
+        <div class="inspector__state">${escapeHtml(instruction)}</div>
         <button class="control control--quiet" type="button" data-action="clear-selection">Clear</button>
       </aside>
     `;
   }
+  const emptyInstruction = state.controllerMode === "manual"
+    ? "Manual assignment — arrived parties only. Drag row → table, or select party → table."
+    : "Override — upcoming locks a plan; arrived seats now. Drag, tap a chip, or select → table.";
   return `
-    <aside class="inspector inspector--empty" aria-label="Manual assignment instructions">
+    <aside class="inspector inspector--empty" aria-label="Host assignment instructions">
       <span class="drag-key" aria-hidden="true">↗</span>
-      <p><strong>Manual override</strong> — select a waiting party, then choose a table. Drag-and-drop works too.</p>
+      <p>${escapeHtml(emptyInstruction)}</p>
     </aside>
   `;
 }
@@ -625,8 +677,11 @@ function render() {
     : state.agentEnabled ? "Local optimizer" : "Manual floor";
   const planLabel = state.controllerMode === "external" ? "External agent" : state.agentEnabled ? "Local optimizer" : "Manual service";
   const planText = state.controllerMode === "manual"
-    ? "Allocation automation is off. Drag a party onto a legal table; all hard constraints still apply."
+    ? "Allocation automation is off. Assign arrived parties by drag or select-then-table; all hard constraints still apply."
     : state.plan;
+  const hostGuidance = state.controllerMode === "manual"
+    ? "Manual · arrived parties only."
+    : "Agent plans · drag, tap chip, or select.";
   const reviewPresentation = agentReviewPresentation();
   const queueCount = queueParties.length;
 
@@ -734,7 +789,7 @@ function render() {
           <div class="assignment-panel__head">
             <div>
               <strong>Parties</strong>
-              <span>Reservations seat first; host tap or drag overrides.</span>
+              <span>${escapeHtml(hostGuidance)}</span>
             </div>
             <span>${queueCount} active</span>
           </div>
@@ -850,7 +905,10 @@ root.addEventListener("click", (event) => {
     renderAgentChange();
     return;
   }
-  if (action === "toggle-agent") setAgentEnabled(state, !state.agentEnabled);
+  if (action === "toggle-agent") {
+    setAgentEnabled(state, !state.agentEnabled);
+    if (!hostActionForParty(getParty(state, selectedPartyId))) selectedPartyId = null;
+  }
   if (action === "reset-night") resetNight();
   if (action === "open-agent-panel") agentPanelOpen = true;
   if (action === "close-agent-panel") agentPanelOpen = false;
@@ -882,16 +940,12 @@ root.addEventListener("click", (event) => {
     selectedTableId = null;
   }
   if (action === "override-candidate") {
-    selectedPartyId = target.dataset.partyId;
-    selectedTableId = target.dataset.tableId;
-    const result = setHostCandidateOverride(state, target.dataset.partyId, target.dataset.tableId);
-    if (!result.ok) showFeedback(result.error.message);
-    else feedback = null;
+    runHostTableAction(target.dataset.partyId, target.dataset.tableId);
   }
   if (action === "assign-candidate") runHostAssignment(target.dataset.partyId, target.dataset.tableId);
   if (action === "select-table") {
     const tableId = target.dataset.tableId;
-    if (selectedPartyId && getParty(state, selectedPartyId)?.status === "waiting") runHostAssignment(selectedPartyId, tableId);
+    if (selectedPartyId && hostActionForParty(getParty(state, selectedPartyId))) runHostTableAction(selectedPartyId, tableId);
     else selectedTableId = selectedTableId === tableId ? null : tableId;
   }
   if (action === "toggle-lock") {
@@ -940,12 +994,17 @@ root.addEventListener("dragstart", (event) => {
   const partyRow = event.target.closest(".party-row[draggable=true]");
   if (!partyRow) return;
   draggingPartyId = partyRow.dataset.partyId;
+  const draggingParty = getParty(state, draggingPartyId);
   selectedPartyId = draggingPartyId;
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("text/plain", draggingPartyId);
   partyRow.classList.add("is-dragging");
   root.querySelectorAll(".table-node").forEach((node) => {
-    const legality = checkAssignmentLegality(state, draggingPartyId, node.dataset.tableId, { forCandidate: true, source: "host" });
+    const legality = checkAssignmentLegality(state, draggingPartyId, node.dataset.tableId, {
+      forCandidate: true,
+      allowUpcoming: draggingParty?.status === "upcoming",
+      source: "host"
+    });
     node.classList.toggle("is-valid-drop", legality.legal);
     node.classList.toggle("is-invalid-drop", !legality.legal);
   });
@@ -968,7 +1027,7 @@ root.addEventListener("drop", (event) => {
   if (!tableNode) return;
   event.preventDefault();
   const partyId = event.dataTransfer.getData("text/plain") || draggingPartyId;
-  runHostAssignment(partyId, tableNode.dataset.tableId);
+  runHostTableAction(partyId, tableNode.dataset.tableId);
   draggingPartyId = null;
   render();
 });

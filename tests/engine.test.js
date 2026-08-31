@@ -19,7 +19,7 @@ import {
   setHostCandidateOverride,
   setWeights
 } from "../src/engine.js";
-import { EXPECTED_DWELL_MINUTES, PREFERENCE_KEYS, RESTAURANT_CAPACITY, SERVICE_START, TABLE_DEFINITIONS, TABLE_UNIT_COUNT } from "../src/data.js";
+import { EXPECTED_DWELL_MINUTES, PARTY_SIZE_DISTRIBUTION, PREFERENCE_KEYS, RESTAURANT_CAPACITY, SERVICE_START, TABLE_DEFINITIONS, TABLE_UNIT_COUNT } from "../src/data.js";
 
 test("the expanded restaurant inventory is exactly 100 seats", () => {
   assert.equal(RESTAURANT_CAPACITY, 100);
@@ -76,6 +76,27 @@ test("random service runs replay by seed and vary parties, timing, constraints, 
   assert.ok(first.parties.some((party) => party.children > 0));
   assert.ok(first.parties.some((party) => party.needsAccessible));
   assert.deepEqual([...new Set(first.parties.map((party) => party.preferences.length))].sort(), [0, 1, 2, 3]);
+});
+
+test("random nights normalize party sizes around mostly two-tops and four-tops", () => {
+  assert.equal(PARTY_SIZE_DISTRIBUTION.reduce((total, entry) => total + entry.weight, 0), 100);
+  assert.equal(
+    PARTY_SIZE_DISTRIBUTION.filter((entry) => [2, 4].includes(entry.size)).reduce((total, entry) => total + entry.weight, 0),
+    72
+  );
+
+  for (let index = 0; index < 100; index += 1) {
+    const state = createInitialState({ scenarioSeed: `party-size-ratio-${index}`, randomizeScenario: true });
+    const twoOrFourCount = state.parties.filter((party) => [2, 4].includes(party.size)).length;
+    const largePartyCount = state.parties.filter((party) => party.size >= 5).length;
+    const meanPartySize = state.parties.reduce((total, party) => total + party.size, 0) / state.parties.length;
+
+    assert.ok(twoOrFourCount / state.parties.length >= 0.68, `too few 2/4-top parties in ${state.runCode}`);
+    assert.ok(twoOrFourCount / state.parties.length <= 0.75, `too many 2/4-top parties in ${state.runCode}`);
+    assert.ok(largePartyCount / state.parties.length >= 0.08, `no realistic large-party tail in ${state.runCode}`);
+    assert.ok(largePartyCount / state.parties.length <= 0.16, `too many large parties in ${state.runCode}`);
+    assert.ok(meanPartySize >= 2.8 && meanPartySize <= 3.2, `unrealistic mean party size in ${state.runCode}`);
+  }
 });
 
 test("service clock maps real seconds to restaurant minutes at 1x, 2x, and 5x", () => {

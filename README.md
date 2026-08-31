@@ -29,8 +29,9 @@ For a container or hosted runtime, expose the server with `HOST_STAND_HOST=0.0.0
 - Use the skip control to jump to the next arrival, auto-assignment, table turn, or service event.
 - Leave **Local optimizer** on to see a rolling 45-minute plan, event-driven reassessments, a full review every 10 restaurant minutes, and automatic execution of an unchanged tentative table at arrival.
 - Reservations and arrived walk-ins share one upcoming-party panel with high-contrast `RES` / `WALK-IN` badges and a visible “Reservation first” key. Waiting reservations sort ahead of waiting walk-ins; upcoming reservations remain chronological. New arrivals preserve the host's current scroll position.
-- Every run generates 20–28 parties with a new roster, reservation/walk-in mix, party sizes, arrival timing, zero-to-three preferences, special needs, no-shows, and possible kitchen delays. A run code is shown in the footer for debugging.
-- Turn the local optimizer off for **Manual floor**. Drag a waiting party onto a table, or select a party and then a table.
+- Every run generates 20–28 parties with a new roster, reservation/walk-in mix, arrival timing, zero-to-three preferences, special needs, no-shows, and possible kitchen delays. Party sizes are normalized per run: 72% are 2- or 4-tops, 12% are 5+, and the expected mean is about three guests. A run code is shown in the footer for debugging.
+- With an agent on, drag an upcoming reservation to a legal table—or select the party and then the table—to replace the tentative agent plan with a locked `HOST` override. Use either gesture on an arrived party to seat it immediately.
+- Turn the local optimizer off for **Manual floor**. Future reservations stay inactive until arrival; then drag the party onto a table, or select the party and then a table.
 - Every generated run includes at least one high-chair and one accessibility constraint for the allocator to solve.
 - Every seated party receives a visible expected finish exactly 90 restaurant minutes after seating.
 - Select a table to lock/unlock it or mark it dirty/ready.
@@ -107,13 +108,13 @@ npm run verify:webmcp # while npm start is running on port 4180
 
 The Node test suite covers the paused initial clock, compression, 10-minute heartbeat, event-driven reviews, the 45-minute horizon, reservation-first commitment order, host priority overrides, reservation and walk-in commitment windows, manual mode, WebMCP upcoming-party plans, hard constraints, locks, weights, 90-minute expected finishes, and the seated → dirty → ready lifecycle.
 
-Browser verification artifacts live in `output/playwright/`. The canonical randomized-night verifier is `verify_browser_randomized.py`; it advances until an actual waiting party appears instead of assuming a specific first event. The recorded passes exercise explicit Start, random New run, pause, 5× playback, manual drag-and-drop, external-agent attachment, scoring and assignment, expected finish data, command filtering and keyboard dismissal, all 20 tool definitions, native-style `getTools()` discovery and `executeTool()` invocation, malformed input and cancellation errors, human-agent state synchronization, console cleanliness, and responsive layouts at 320, 375, 414, and 768 CSS pixels.
+Browser verification artifacts live in `output/playwright/`. The canonical randomized-night verifier is `verify_browser_randomized.py`; it advances until an actual waiting party appears instead of assuming a specific first event. The recorded passes exercise explicit Start, random New run, pause, 5× playback, agent-on host overrides through drag-and-drop and select-then-table, manual drag-and-drop, external-agent attachment, scoring and assignment, expected finish data, command filtering and keyboard dismissal, all 20 tool definitions, native-style `getTools()` discovery and `executeTool()` invocation, malformed input and cancellation errors, human-agent state synchronization, console cleanliness, and responsive layouts at 320, 375, 414, and 768 CSS pixels.
 
 ## Implementation notes
 
 - Pure HTML, CSS, and JavaScript modules; no framework or application dependencies.
 - Built-in Local optimizer behavior is a deterministic scoring algorithm. It does not call an LLM. An external AI agent can explicitly take ownership with `attach_agent`, inspect and operate the same state through WebMCP, and remain attached across random New runs.
-- Local and external automation share the same reservation-first commit guard. Candidate plans remain visible for walk-ins, but automation cannot assign or hold a table for one while an unassigned waiting reservation has a legal table available. Human drag-and-drop is the explicit override.
+- Local and external automation share the same reservation-first commit guard. Candidate plans remain visible for walk-ins, but automation cannot assign or hold a table for one while an unassigned waiting reservation has a legal table available. Human drag-and-drop or select-party-then-table is the explicit override: it locks the plan for an upcoming reservation and commits immediately for an arrived party.
 - A conservative 90-minute occupancy assumption produces deterministic expected finish times for every seated party.
 - Capacity and utilization are derived from the table inventory. The expanded room totals exactly 100 seats across 27 units, including the new V6, B5, and S6 tables.
 - This is a demo, not a production reservation, POS, or guest-messaging system.

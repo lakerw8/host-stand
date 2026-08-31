@@ -1278,6 +1278,11 @@ svg {
   margin-inline-end: var(--space-2xs);
 }
 
+.party-row.has-host-override .candidate-list__label {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
 .preference-chip {
   background: var(--color-paper-2);
   border: var(--rule-hairline);

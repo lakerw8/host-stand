@@ -141,6 +141,43 @@ def main():
         page.screenshot(path=str(OUTPUT / "reservation-walkin-priority.png"), full_page=True)
         results.append("source labels remain unmistakable and new walk-ins join without moving the host's scroll position")
 
+        planned_party = page.locator('.party-row[data-host-action="plan"]').first
+        assert planned_party.count() == 1, "agent mode did not expose an upcoming reservation as a host override target"
+        planned_party_id = planned_party.get_attribute("data-party-id")
+        drag_plan_table = page.evaluate("""async partyId => {
+          const floor = await window.hostStandInvokeTool('get_floor', {});
+          for (const table of floor.tables) {
+            const score = await window.hostStandInvokeTool('score_assignment', {party_id: partyId, table_id: table.id});
+            if (score.legal) return table.id;
+          }
+          return null;
+        }""", planned_party_id)
+        assert drag_plan_table is not None
+        planned_party.drag_to(page.locator(f'.table-node[data-table-id="{drag_plan_table}"]'))
+        planned_party = page.locator(f'.party-row[data-party-id="{planned_party_id}"]')
+        host_chip = planned_party.locator(".candidate-button.is-host-override")
+        assert drag_plan_table in host_chip.inner_text() and "HOST" in host_chip.inner_text()
+        assert "Host override active" in page.locator(".inspector").inner_text()
+
+        second_planned_party = page.locator('.party-row[data-host-action="plan"]:not(.has-host-override)').first
+        assert second_planned_party.count() == 1
+        second_planned_party_id = second_planned_party.get_attribute("data-party-id")
+        click_plan_table = page.evaluate("""async partyId => {
+          const floor = await window.hostStandInvokeTool('get_floor', {});
+          for (const table of floor.tables) {
+            const score = await window.hostStandInvokeTool('score_assignment', {party_id: partyId, table_id: table.id});
+            if (score.legal) return table.id;
+          }
+          return null;
+        }""", second_planned_party_id)
+        assert click_plan_table is not None
+        second_planned_party.locator(".party-select").click()
+        page.locator(f'.table-node[data-table-id="{click_plan_table}"]').click()
+        second_host_chip = page.locator(f'.party-row[data-party-id="{second_planned_party_id}"] .candidate-button.is-host-override')
+        assert click_plan_table in second_host_chip.inner_text() and "HOST" in second_host_chip.inner_text()
+        assert page.locator('[data-action="toggle-agent"]').get_attribute("aria-checked") == "true"
+        results.append("agent-on host overrides work by drag-and-drop and by selecting a party then a table")
+
         page.locator('[data-action="toggle-agent"]').click()
         assert page.locator('[data-action="toggle-agent"]').get_attribute("aria-checked") == "false"
         waiting_party = page.locator('.party-row[draggable="true"]').first
