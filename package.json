@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "description": "A WebMCP-enabled restaurant host stand simulation for the OpenAI WebMCP Challenge.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lakerw8/host-stand.git"
+  },
+  "homepage": "https://github.com/lakerw8/host-stand#readme",
+  "bugs": "https://github.com/lakerw8/host-stand/issues",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test tests/*.test.js",
