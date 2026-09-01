@@ -7,6 +7,7 @@ import {
   TABLE_DEFINITIONS,
   createNightParties,
   createRandomNightScenario,
+  createServiceBrief,
   minutesToTime
 } from "./data.js";
 
@@ -22,7 +23,7 @@ export const AGENT_HEARTBEAT_MINUTES = 10;
 export const AGENT_PLANNING_HORIZON_MINUTES = 45;
 export const AGENT_FREEZE_WINDOW_MINUTES = 5;
 export const AGENT_STABILITY_THRESHOLD = 0.1;
-const TABLE_RESET_MINUTES = 3;
+export const TABLE_RESET_MINUTES = 3;
 
 const runtimeTable = (definition) => ({
   ...clone(definition),
@@ -36,7 +37,9 @@ const runtimeTable = (definition) => ({
   nextPartyId: null,
   seatedAt: null,
   dueAt: null,
-  dirtyUntil: null
+  dirtyUntil: null,
+  assignmentOrigin: null,
+  assignmentReason: null
 });
 
 const runtimeParty = (definition) => ({
@@ -52,16 +55,21 @@ const runtimeParty = (definition) => ({
   seatedAt: null,
   leftAt: null,
   assignedBy: null,
+  assignmentOrigin: null,
+  assignmentReason: null,
+  candidateReason: null,
   seatingScore: null
 });
 
 export function createInitialState(options = {}) {
   const scenarioSeed = options.scenarioSeed ?? options.preferenceSeed ?? "host-stand-saturday";
+  const scriptedParties = options.randomizeScenario ? null : createNightParties(scenarioSeed);
   const scenario = options.randomizeScenario
     ? createRandomNightScenario(scenarioSeed)
     : {
-        parties: createNightParties(scenarioSeed),
+        parties: scriptedParties,
         events: clone(SCRIPTED_EVENTS),
+        serviceBrief: createServiceBrief(scriptedParties, `${scenarioSeed}-brief`, { excludedPartyIds: ["alvarez"] }),
         seed: String(scenarioSeed),
         runCode: "SATURDAY"
       };
@@ -86,6 +94,7 @@ export function createInitialState(options = {}) {
     tables: TABLE_DEFINITIONS.map(runtimeTable),
     parties: scenario.parties.map(runtimeParty),
     events: scenario.events,
+    serviceBrief: clone(scenario.serviceBrief),
     scenarioSeed: scenario.seed,
     runCode: scenario.runCode,
     preferenceSeed: scenario.seed,
@@ -99,7 +108,7 @@ export function createInitialState(options = {}) {
         source: "system"
       }
     ],
-    plan: "Doors open at 6:00. The floor is clear and the agent is watching the arrival book.",
+    plan: "Doors open at 5:00. The floor is clear and the agent is watching the arrival book.",
     planBullets: ["Seat waiting reservations before walk-ins when a legal table is available", "Respect host overrides as fixed", "Protect right-sized tables for the full service"],
     seatingRecords: [],
     coversHistory: [],
@@ -146,15 +155,6 @@ function failure(state, code, message, details = {}) {
   return { ok: false, error: { code, message, ...details } };
 }
 
-function stableFraction(seedText) {
-  let hash = 2166136261;
-  for (const character of seedText) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return ((hash >>> 0) % 1000) / 999;
-}
-
 function preferenceMatches(party, table) {
   const matchers = {
     view: table.zone === "view",
@@ -169,11 +169,53 @@ function preferenceMatches(party, table) {
   return party.preferences.filter((preference) => matchers[preference]);
 }
 
+function tableGridDistance(leftTable, rightTable) {
+  if (!leftTable || !rightTable) return null;
+  const leftColumn = leftTable.layout.column + (leftTable.layout.columnSpan - 1) / 2;
+  const leftRow = leftTable.layout.row + (leftTable.layout.rowSpan - 1) / 2;
+  const rightColumn = rightTable.layout.column + (rightTable.layout.columnSpan - 1) / 2;
+  const rightRow = rightTable.layout.row + (rightTable.layout.rowSpan - 1) / 2;
+  return Math.abs(leftColumn - rightColumn) + Math.abs(leftRow - rightRow);
+}
+
+function serviceBriefAdjustment(state, party, table) {
+  const directives = state.serviceBrief?.directives || [];
+  const targetMinute = party.status === "upcoming" ? party.reservedFor : state.now;
+  let adjustment = 0;
+  const reasons = [];
+
+  for (const directive of directives) {
+    if (directive.type === "section_load"
+      && targetMinute >= directive.from
+      && targetMinute < directive.until
+      && table.zone === directive.zone) {
+      adjustment -= 0.12;
+      reasons.push(`${directive.server}’s ${directive.sectionLabel} is overloaded`);
+    }
+    if (directive.type === "party_proximity" && directive.partyIds.includes(party.id)) {
+      const otherPartyId = directive.partyIds.find((partyId) => partyId !== party.id);
+      const otherParty = getParty(state, otherPartyId);
+      const otherTableId = otherParty?.committedTableId
+        || otherParty?.hostOverrideTableId
+        || otherParty?.candidateTableIds?.[0];
+      const otherTable = otherTableId ? getTable(state, otherTableId) : null;
+      const distance = tableGridDistance(table, otherTable);
+      if (distance != null) {
+        const nearby = distance <= directive.maxTableDistance;
+        adjustment += nearby ? 0.1 : -0.1;
+        reasons.push(`${nearby ? "near" : "far from"} ${otherParty.name} at ${otherTable.id}`);
+      }
+    }
+  }
+
+  return { adjustment, reasons };
+}
+
 function projectedFreeMinute(table, now) {
   if (table.status === "free") return now;
   if (table.status === "held") return table.holdUntil ?? now + 20;
-  if (table.status === "seated") return (table.dueAt ?? now + EXPECTED_DWELL_MINUTES) + 3;
-  if (table.status === "dirty") return table.dirtyUntil ?? now + 5;
+  if (table.status === "seated") return (table.dueAt ?? now + EXPECTED_DWELL_MINUTES) + TABLE_RESET_MINUTES;
+  if (table.status === "dirty") return table.dirtyUntil ?? now + TABLE_RESET_MINUTES;
   return now + 60;
 }
 
@@ -261,11 +303,13 @@ export function scoreAssignment(state, partyId, tableId, options = {}) {
   const availabilityDelay = Math.max(0, projectedFreeMinute(table, state.now) - targetMinute);
   const availabilityPenalty = Math.min(0.35, availabilityDelay / 120);
   const regularBoost = party.isRegular ? 0.025 : 0;
-  const score = clamp(state.weights.sat * sat + state.weights.turn * turn + regularBoost - availabilityPenalty);
+  const brief = serviceBriefAdjustment(state, party, table);
+  const score = clamp(state.weights.sat * sat + state.weights.turn * turn + regularBoost - availabilityPenalty + brief.adjustment);
   const priorityBlocker = getReservationPriorityBlocker(state, party);
 
   const reasons = [
     ...(priorityBlocker ? [`Reservation priority: seat ${priorityBlocker.partyName} first`] : []),
+    ...brief.reasons,
     `${matches.length}/${party.preferences.length || 0} stated preferences matched`,
     `${Math.round(sizeEfficiency * 100)}% seat fit`,
     availabilityDelay ? `likely available in ${availabilityDelay} min` : "available now"
@@ -280,6 +324,8 @@ export function scoreAssignment(state, partyId, tableId, options = {}) {
     prefScore,
     matchedPreferences: matches,
     availabilityDelay,
+    serviceBriefAdjustment: brief.adjustment,
+    serviceBriefReasons: brief.reasons,
     reservationPriority: priorityBlocker
       ? { blocked: true, ...priorityBlocker, hostMayOverride: true }
       : { blocked: false, hostMayOverride: true },
@@ -331,6 +377,7 @@ function clearCandidatePlan(party) {
   party.candidateState = "unplanned";
   party.candidateUpdatedAt = null;
   party.candidateFrozen = false;
+  party.candidateReason = null;
 }
 
 function scheduledCandidateScores(state, party, tableAvailableAt) {
@@ -392,6 +439,7 @@ function publishCandidatePlan(state, party, entries, tableAvailableAt) {
   party.candidateFrozen = party.status === "upcoming"
     && party.reservedFor - state.now <= AGENT_FREEZE_WINDOW_MINUTES;
   party.candidateState = party.hostOverrideTableId ? "host_override" : "tentative";
+  party.candidateReason = primary.result.reasons.slice(0, 2).join("; ");
 
   if (party.status === "waiting") {
     if (party.autoAssignAt == null || changed) {
@@ -519,8 +567,28 @@ function commitExternalCandidateDeadlines(state) {
   }
 }
 
-function seatPartyAtTable(state, party, table, source) {
+function assignmentOriginFor(state, source, preservedOrigin = null) {
+  if (preservedOrigin) return clone(preservedOrigin);
+  if (source === "host") return { kind: "host", label: "Host override" };
+  if (source === "agent" && state.controllerMode === "external") {
+    return { kind: "external", label: state.agentConnection?.name || "External AI" };
+  }
+  if (source === "agent") return { kind: "local", label: "Local algorithm" };
+  return { kind: "system", label: "Service clock" };
+}
+
+function assignmentReasonFor(scored, origin, suppliedReason = null) {
+  const cleanReason = String(suppliedReason || "").trim().slice(0, 180);
+  if (cleanReason) return cleanReason;
+  if (origin.kind === "host") return "Manual host override.";
+  if (scored.serviceBriefReasons?.length) return scored.serviceBriefReasons.join("; ");
+  return scored.reasons.slice(0, 2).join("; ");
+}
+
+function seatPartyAtTable(state, party, table, source, options = {}) {
   const scored = scoreAssignment(state, party.id, table.id, { forCandidate: true, source });
+  const assignmentOrigin = assignmentOriginFor(state, source, options.origin);
+  const assignmentReason = assignmentReasonFor(scored, assignmentOrigin, options.reason || party.assignmentReason || party.candidateReason);
   const origin = party.source === "walk_in" ? party.arrivedAt : party.reservedFor;
   const wait = Math.max(0, state.now - origin);
   table.status = "seated";
@@ -531,6 +599,8 @@ function seatPartyAtTable(state, party, table, source) {
   table.seatedAt = state.now;
   table.dueAt = state.now + EXPECTED_DWELL_MINUTES;
   table.dirtyUntil = null;
+  table.assignmentOrigin = clone(assignmentOrigin);
+  table.assignmentReason = assignmentReason;
 
   party.status = "seated";
   party.seatedAt = state.now;
@@ -542,6 +612,9 @@ function seatPartyAtTable(state, party, table, source) {
   party.candidateFrozen = true;
   party.hostOverrideTableId = null;
   party.assignedBy = source;
+  party.assignmentOrigin = clone(assignmentOrigin);
+  party.assignmentReason = assignmentReason;
+  party.candidateReason = null;
   party.seatingScore = scored;
 
   const record = {
@@ -554,14 +627,16 @@ function seatPartyAtTable(state, party, table, source) {
     turn: scored.turn,
     preferences: party.preferences.length,
     matchedPreferences: scored.matchedPreferences.length,
-    source
+    source,
+    assignmentOrigin: clone(assignmentOrigin),
+    assignmentReason
   };
   state.seatingRecords.push(record);
   state.coversHistory.push({ minute: state.now, covers: party.size });
   state.scoreHistory.push({ minute: state.now, sat: scored.sat });
   state.scoreHistory = state.scoreHistory.slice(-20);
-  logActivity(state, "assign_table", `${table.id} ← ${party.name} · ${source}`, source);
-  state.plan = `${party.name} seated at ${table.id}. ${scored.reasons[0]}; ${scored.reasons[1].toLowerCase()}.`;
+  logActivity(state, "assign_table", `${table.id} ← ${party.name} · ${assignmentOrigin.label} · ${assignmentReason}`, source);
+  state.plan = `${assignmentOrigin.label} seated ${party.name} at ${table.id}. ${assignmentReason}`;
 }
 
 export function assignTable(state, partyId, tableId, options = {}) {
@@ -586,8 +661,11 @@ export function assignTable(state, partyId, tableId, options = {}) {
   }
 
   if (table.status === "free" || (table.status === "held" && table.heldForPartyId === party.id)) {
-    seatPartyAtTable(state, party, table, source);
+    seatPartyAtTable(state, party, table, source, options);
   } else {
+    const assignmentOrigin = assignmentOriginFor(state, source, options.origin);
+    const scored = scoreAssignment(state, party.id, table.id, { forCandidate: true, source });
+    const assignmentReason = assignmentReasonFor(scored, assignmentOrigin, options.reason || party.assignmentReason || party.candidateReason);
     table.nextPartyId = party.id;
     party.committedTableId = table.id;
     party.candidateTableIds = [];
@@ -597,7 +675,9 @@ export function assignTable(state, partyId, tableId, options = {}) {
     party.candidateFrozen = true;
     party.hostOverrideTableId = null;
     party.assignedBy = source;
-    logActivity(state, "assign_table", `${table.id} held next for ${party.name} · ${source}`, source);
+    party.assignmentOrigin = clone(assignmentOrigin);
+    party.assignmentReason = assignmentReason;
+    logActivity(state, "assign_table", `${table.id} held next for ${party.name} · ${assignmentOrigin.label} · ${assignmentReason}`, source);
   }
 
   if (!options.skipPlan) requestAgentReview(state, source === "host" ? "host assignment override" : "assignment committed", { allowAutoCommit: false });
@@ -618,11 +698,13 @@ export function moveParty(state, partyId, tableId, options = {}) {
     currentTable.status = "dirty";
     currentTable.partyId = null;
     currentTable.dueAt = null;
-    currentTable.dirtyUntil = state.now + 3;
+    currentTable.dirtyUntil = state.now + TABLE_RESET_MINUTES;
+    currentTable.assignmentOrigin = null;
+    currentTable.assignmentReason = null;
   }
   party.status = "waiting";
   party.committedTableId = null;
-  seatPartyAtTable(state, party, destination, options.source || "host");
+  seatPartyAtTable(state, party, destination, options.source || "host", options);
   logActivity(state, "move_party", `${party.name}: ${currentTable?.id || "waitlist"} → ${destination.id}`, options.source || "host");
   requestAgentReview(state, "party moved", { allowAutoCommit: false });
   return success(state, { partyId, from: currentTable?.id || null, to: tableId });
@@ -639,7 +721,9 @@ export function unassignParty(state, partyId, options = {}) {
     table.status = "dirty";
     table.partyId = null;
     table.dueAt = null;
-    table.dirtyUntil = state.now + 3;
+    table.dirtyUntil = state.now + TABLE_RESET_MINUTES;
+    table.assignmentOrigin = null;
+    table.assignmentReason = null;
   }
   if (table?.nextPartyId === party.id) table.nextPartyId = null;
   party.status = "waiting";
@@ -657,7 +741,7 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
   const isPlannable = party?.status === "waiting"
     || (party?.source === "reservation" && party?.status === "upcoming");
   if (!party || !isPlannable) return failure(state, "PARTY_NOT_PLANNABLE", `${partyId} is not an upcoming reservation or waiting party.`);
-  const uniqueIds = [...new Set(tableIds)].slice(0, 4);
+  const uniqueIds = [...new Set(tableIds)].slice(0, 3);
   if (!uniqueIds.length) return failure(state, "CANDIDATES_REQUIRED", "At least one candidate table is required.");
   const source = options.source || "agent";
   if (party.hostOverrideTableId && source !== "host" && uniqueIds[0] !== party.hostOverrideTableId) {
@@ -671,6 +755,8 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
   party.candidateTableIds = uniqueIds;
   party.candidateState = source === "host" ? "host_override" : "tentative";
   party.candidateUpdatedAt = state.now;
+  party.candidateReason = String(options.reason || "").trim().slice(0, 180)
+    || (source === "host" ? "Manual host override." : "Agent-ranked table plan.");
   party.candidateFrozen = party.status === "upcoming" && party.reservedFor - state.now <= AGENT_FREEZE_WINDOW_MINUTES;
   if (party.status === "waiting" && (previousTop !== uniqueIds[0] || party.autoAssignAt == null)) {
     const deadline = autoAssignAt == null ? state.now + AGENT_FREEZE_WINDOW_MINUTES : autoAssignAt;
@@ -797,12 +883,16 @@ export function markTable(state, tableId, status, options = {}) {
     table.partyId = null;
     table.dueAt = null;
     table.dirtyUntil = null;
+    table.assignmentOrigin = null;
+    table.assignmentReason = null;
     seatCommittedPartyIfReady(state, table);
   } else if (status === "dirty") {
     table.status = "dirty";
     table.partyId = null;
     table.dueAt = null;
-    table.dirtyUntil = state.now + (options.slowBusser ? 8 : 3);
+    table.dirtyUntil = state.now + TABLE_RESET_MINUTES;
+    table.assignmentOrigin = null;
+    table.assignmentReason = null;
   } else if (!table.partyId) {
     return failure(state, "PARTY_REQUIRED", "A party must be assigned before marking a table seated.");
   }
@@ -834,7 +924,9 @@ export function markParty(state, partyId, status, options = {}) {
       table.status = "dirty";
       table.partyId = null;
       table.dueAt = null;
-      table.dirtyUntil = state.now + 3;
+      table.dirtyUntil = state.now + TABLE_RESET_MINUTES;
+      table.assignmentOrigin = null;
+      table.assignmentReason = null;
     }
     if (table?.nextPartyId === party.id) table.nextPartyId = null;
     party.status = status;
@@ -878,7 +970,12 @@ function seatCommittedPartyIfReady(state, table) {
   }
   const partyId = table.nextPartyId;
   table.nextPartyId = null;
-  const result = assignTable(state, partyId, table.id, { source: nextParty.assignedBy || "agent", skipPlan: true });
+  const result = assignTable(state, partyId, table.id, {
+    source: nextParty.assignedBy || "agent",
+    skipPlan: true,
+    origin: nextParty.assignmentOrigin,
+    reason: nextParty.assignmentReason
+  });
   if (!result.ok && result.error?.code === "RESERVATION_PRIORITY" && nextParty.assignedBy !== "host") {
     nextParty.committedTableId = null;
     nextParty.assignedBy = null;
@@ -899,13 +996,17 @@ function processTableTransitions(state) {
       table.status = "dirty";
       table.partyId = null;
       table.dueAt = null;
-      table.dirtyUntil = state.now + (stableFraction(`${table.id}:busser`) < 0.2 ? 8 : 3);
+      table.dirtyUntil = state.now + TABLE_RESET_MINUTES;
+      table.assignmentOrigin = null;
+      table.assignmentReason = null;
       logActivity(state, "mark_table", `${table.id} → dirty`, "clock");
       changed = true;
     }
     if (table.status === "dirty" && table.dirtyUntil != null && table.dirtyUntil <= state.now) {
       table.status = "free";
       table.dirtyUntil = null;
+      table.assignmentOrigin = null;
+      table.assignmentReason = null;
       logActivity(state, "mark_table", `${table.id} → ready`, "clock");
       seatCommittedPartyIfReady(state, table);
       changed = true;
@@ -1145,6 +1246,129 @@ export function getMetrics(state) {
   };
 }
 
+function latestSeatingRecord(state, partyId) {
+  return [...state.seatingRecords].reverse().find((record) => record.partyId === partyId) || null;
+}
+
+function scoreServiceBrief(state) {
+  const results = (state.serviceBrief?.directives || []).map((directive) => {
+    if (directive.type === "section_load") {
+      const assignments = state.seatingRecords.filter((record) => record.minute >= directive.from && record.minute < directive.until);
+      const addedToSection = assignments.filter((record) => getTable(state, record.tableId)?.zone === directive.zone).length;
+      const value = assignments.length ? clamp(1 - addedToSection / assignments.length) : 1;
+      return {
+        id: directive.id,
+        text: directive.text,
+        value,
+        result: assignments.length
+          ? `${addedToSection} of ${assignments.length} assignments added to ${directive.server}’s section`
+          : "No assignments were needed during the overload window"
+      };
+    }
+    if (directive.type === "party_proximity") {
+      const records = directive.partyIds.map((partyId) => latestSeatingRecord(state, partyId));
+      if (records.some((record) => !record)) {
+        return { id: directive.id, text: directive.text, value: 0, result: "Both linked parties were not seated" };
+      }
+      const distance = tableGridDistance(getTable(state, records[0].tableId), getTable(state, records[1].tableId));
+      const value = distance <= directive.maxTableDistance ? 1 : distance <= directive.maxTableDistance + 2 ? 0.5 : 0;
+      return {
+        id: directive.id,
+        text: directive.text,
+        value,
+        result: `${directive.partyNames.join(" & ")} were seated ${distance.toFixed(1)} floor-grid units apart`
+      };
+    }
+    return { id: directive.id, text: directive.text, value: 1, result: "Not scored" };
+  });
+  return {
+    value: results.length ? results.reduce((total, result) => total + result.value, 0) / results.length : 1,
+    results
+  };
+}
+
+export function getServiceRecap(state) {
+  const uniquePartyIds = new Set(state.seatingRecords.map((record) => record.partyId));
+  const records = [...uniquePartyIds].map((partyId) => latestSeatingRecord(state, partyId)).filter(Boolean);
+  const eligiblePartyCount = state.parties.filter((party) => party.status !== "no_show").length;
+  const averageSat = records.length
+    ? records.reduce((total, record) => total + record.sat, 0) / records.length
+    : 0;
+  const walkInWaits = records
+    .filter((record) => getParty(state, record.partyId)?.source === "walk_in")
+    .map((record) => record.wait);
+  const averageTurn = records.length
+    ? records.reduce((total, record) => total + record.turn, 0) / records.length
+    : 0;
+  const brief = scoreServiceBrief(state);
+  const values = {
+    guestSatisfaction: averageSat,
+    waitControl: walkInWaits.length ? clamp(1 - percentile(walkInWaits, 0.9) / 45) : 0,
+    tableFit: averageTurn,
+    completion: eligiblePartyCount ? uniquePartyIds.size / eligiblePartyCount : 0,
+    briefAdherence: brief.value
+  };
+  const weights = {
+    guestSatisfaction: 0.3,
+    waitControl: 0.2,
+    tableFit: 0.2,
+    completion: 0.15,
+    briefAdherence: 0.15
+  };
+  const labels = {
+    guestSatisfaction: "Guest satisfaction",
+    waitControl: "Walk-in wait control",
+    tableFit: "Table fit & turns",
+    completion: "Parties served",
+    briefAdherence: "Service brief"
+  };
+  const score = Math.round(Object.keys(weights).reduce((total, key) => total + values[key] * weights[key], 0) * 100);
+  const grade = score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";
+  const provenance = new Map();
+  for (const record of records) {
+    const origin = record.assignmentOrigin || { kind: record.source === "host" ? "host" : "local", label: record.source === "host" ? "Host override" : "Local algorithm" };
+    const current = provenance.get(origin.kind) || { kind: origin.kind, label: origin.label, assignments: 0, covers: 0 };
+    current.assignments += 1;
+    current.covers += record.size;
+    provenance.set(origin.kind, current);
+  }
+
+  return {
+    official: false,
+    status: state.now >= SERVICE_END ? "complete" : "provisional",
+    score,
+    grade,
+    scoreLabel: "Host Stand service score",
+    formula: "30% guest satisfaction · 20% walk-in wait control · 20% table fit · 15% parties served · 15% service brief",
+    components: Object.keys(weights).map((key) => ({
+      key,
+      label: labels[key],
+      weight: weights[key],
+      value: values[key],
+      points: Math.round(values[key] * weights[key] * 100)
+    })),
+    partiesServed: uniquePartyIds.size,
+    eligibleParties: eligiblePartyCount,
+    coversServed: records.reduce((total, record) => total + record.size, 0),
+    provenance: [...provenance.values()],
+    briefResults: brief.results
+  };
+}
+
+function nextRecommendedActions(state) {
+  if (state.now >= SERVICE_END) return ["Review the service recap", "Start a new random run"];
+  const waitingReservation = state.parties.find((party) => party.source === "reservation" && party.status === "waiting" && !party.committedTableId);
+  if (state.controllerMode === "manual") {
+    return waitingReservation
+      ? [`Seat reservation ${waitingReservation.name} before a walk-in`, "Drag the party row to a legal table or select party then table"]
+      : ["Assign each arrived party manually", "Quote a wait when no legal table is ready"];
+  }
+  if (state.controllerMode === "external" && state.agentReview.status === "review_due") {
+    return ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason", "Explain the current whole-floor plan"];
+  }
+  return ["Monitor tentative tables", "Override any plan by dragging a party to another legal table"];
+}
+
 export function getFloorSnapshot(state) {
   return {
     clock: minutesToTime(state.now),
@@ -1165,6 +1389,8 @@ export function getFloorSnapshot(state) {
     capacity: RESTAURANT_CAPACITY,
     tableUnitCount: state.tables.length,
     kitchenDelay: Boolean(state.kitchenDelayUntil && state.now < state.kitchenDelayUntil),
+    serviceBrief: clone(state.serviceBrief),
+    nextRecommendedActions: nextRecommendedActions(state),
     weights: clone(state.weights),
     tables: state.tables.map((table) => ({
       id: table.id,
@@ -1183,9 +1409,17 @@ export function getFloorSnapshot(state) {
       heldForPartyId: table.heldForPartyId,
       nextPartyId: table.nextPartyId,
       expectedFinishAt: table.status === "seated" ? table.dueAt : null,
-      likelyFree: table.status === "seated" && table.dueAt ? { earliest: table.dueAt, latest: table.dueAt } : null
+      dirtyUntil: table.status === "dirty" ? table.dirtyUntil : null,
+      assignmentOrigin: table.status === "seated" ? clone(table.assignmentOrigin) : null,
+      assignmentReason: table.status === "seated" ? table.assignmentReason : null,
+      likelyFree: table.status === "seated" && table.dueAt
+        ? { earliest: table.dueAt + TABLE_RESET_MINUTES, latest: table.dueAt + TABLE_RESET_MINUTES }
+        : table.status === "dirty" && table.dirtyUntil
+          ? { earliest: table.dirtyUntil, latest: table.dirtyUntil }
+          : null
     })),
-    metrics: getMetrics(state)
+    metrics: getMetrics(state),
+    serviceRecap: state.now >= SERVICE_END ? getServiceRecap(state) : null
   };
 }
 
@@ -1197,6 +1431,8 @@ export function getQueueSnapshot(state) {
       rule: "Seat a waiting reservation first whenever a legal table is available.",
       hostMayOverride: true
     },
+    serviceBrief: clone(state.serviceBrief),
+    nextRecommendedActions: nextRecommendedActions(state),
     reservations: state.parties.filter((party) => party.source === "reservation" && ["upcoming", "waiting"].includes(party.status)).map(queueParty(state)),
     walkIns: state.parties.filter((party) => party.source === "walk_in" && party.status === "waiting").map(queueParty(state))
   };
@@ -1226,9 +1462,12 @@ function queueParty(state) {
     candidateState: party.candidateState,
     candidateUpdatedAt: party.candidateUpdatedAt,
     candidateFrozen: party.candidateFrozen,
+    candidateReason: party.candidateReason,
     hostOverrideTableId: party.hostOverrideTableId,
     insidePlanningHorizon: isInsidePlanningHorizon(state, party),
-    committedTableId: party.committedTableId
+    committedTableId: party.committedTableId,
+    assignmentOrigin: clone(party.assignmentOrigin),
+    assignmentReason: party.assignmentReason
     });
   };
 }

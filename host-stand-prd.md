@@ -25,8 +25,10 @@ Out of scope for the demo: real POS, real reservations vendor, payments, staff l
 This is a **demo restaurant**, not a production host tool.
 
 - All guests are fake and named.
-- A **service clock** runs from 5:45pm to 9:30pm. Real time is compressed (default: 1 second = 1 restaurant minute). The host can pause, play, and jump.
+- A **service clock** runs from 5:00pm to 10:00pm. Real time is compressed (default: 1 second = 1 restaurant minute). The host can pause, play, and jump.
 - The agent maintains a rolling 45-minute plan with up to three legal, ranked candidate tables. Reservations execute their stable plan when they arrive; newly discovered walk-ins receive a five-minute override window. When a waiting reservation has a legal available table, automation must seat it before any walk-in. The human host can explicitly override by tapping or dragging.
+- Every random run supplies two seating-relevant whole-floor directives: one temporarily overloaded server section and one pair of reservation parties that prefer nearby tables. They influence ranking and the recap, but never relax hard constraints or reservation priority.
+- Every tentative and committed decision preserves a visible owner and reason: `HOST` for a manual override, `ALG` for the built-in deterministic baseline, or `AI` for an attached WebMCP agent.
 - On-screen scores tick so a 3-minute video can show the tradeoff working, not a static floor.
 
 Success for the hackathon: a judge opens the live URL, sees the agent seat a walk-in, sees a host override, sees the plan reflow, and can tell what WebMCP tools fired.
@@ -37,7 +39,7 @@ Success for the hackathon: a judge opens the live URL, sees the agent seat a wal
 
 **Host (human).** Optional override. Taps one of the candidate chips, or drags onto a table. Locks a table the agent must not touch. Marks no-show / dirty / ready. If they do nothing, the agent’s pick stands.
 
-**Agent (WebMCP).** Produces candidate sets for waiting parties and reservations inside the planning horizon, reviews every 10 restaurant minutes and after floor events, then commits from the stable set at arrival/deadline unless the host already picked. Reads floor + waitlist + clock, scores, `set_candidates`, then `assign_table` / `hold_table`. Does not scrape buttons or freeze the night waiting for approval.
+**Agent (WebMCP).** Produces candidate sets for waiting parties and reservations inside the planning horizon, reviews every 10 restaurant minutes and after floor events, then commits from the stable set at arrival/deadline unless the host already picked. Reads floor + waitlist + clock + service brief, scores, `set_candidates` with a reason, then `assign_table` / `hold_table`. Does not scrape buttons or freeze the night waiting for approval.
 
 They share one page. The agent is not a sidebar that prints table numbers as text.
 
@@ -88,7 +90,7 @@ Every table has: `id`, `seats` (hard max), `min_seats` (soft: wasting a big tabl
 
 ### 4.2 Hard constraints (never break)
 
-1. Party size ≤ table seats. Counter: a party of 3+ cannot sit at the bar unless host overrides.
+1. Party size ≤ table seats. This is a maximum, so a party of 3 may legally use a 4-top; right-sizing affects the score but not legality. Counter: a party of 3+ cannot sit at the bar unless host overrides.
 2. Do not seat on `dirty`, `seated`, or someone else’s `held`.
 3. Do not seat on a host-`locked` table.
 4. Private rooms: party size ≥ 5, unless host overrides.
@@ -140,14 +142,14 @@ One compact operational queue on the **left rail**, beside the table floor. Rese
 
 ### 5.2 Random service generator
 
-Clock starts **5:45pm** and each new run creates a different service scenario. The run code makes any generated night reproducible for debugging without making the demo deterministic.
+Clock starts **5:00pm** and each new run creates a different service scenario. The run code makes any generated night reproducible for debugging without making the demo deterministic.
 
-- Generate 20–28 named parties with a randomized reservation/walk-in mix, service timing, lateness, no-shows, regulars, children, and accessibility needs. Normalize party sizes within each run to a real-service target: 1 (6%), 2 (48%), 3 (10%), 4 (24%), 5 (4%), 6 (5%), and 8 (3%). This keeps 72% of parties at 2 or 4 seats, with an occasional 12% at 5+.
+- Generate 84–96 named parties with a randomized reservation/walk-in mix, service timing, lateness, no-shows, regulars, children, and accessibility needs. Weight arrivals into a 6–9pm dinner rush and require generated scenarios to reach at least 80% table-seat utilization. Normalize party sizes within each run to a real-service target: 1 (6%), 2 (48%), 3 (10%), 4 (24%), 5 (4%), 6 (5%), and 8 (3%). This keeps 72% of parties at 2 or 4 seats, with an occasional 12% at 5+.
 - Every party receives zero to three unique random preferences. Each generated night covers the full zero-through-three range.
 - Every run includes at least one high-chair constraint and one accessibility constraint so the allocator must solve hard cases.
 - Walk-ins arrive throughout service with noisy peaks; reservations may arrive on time, late, or no-show.
-- Possible kitchen-delay and slow-busser events force replanning.
-- **New run** clears the floor, returns the clock to a paused 5:45pm, and generates a new seed.
+- Possible kitchen-delay events force replanning.
+- **New run** clears the floor, returns the clock to a paused 5:00pm, and generates a new seed.
 
 ---
 
@@ -165,7 +167,7 @@ The clock is the product. Without it, this is a static puzzle.
 - Reservation late: 0 / 10 / 20 min, or no-show after 20.
 - Party size +1 at check-in (10%).
 - A possible kitchen-delay window changes kitchen-zone desirability.
-- Some dirty tables take 8 minutes instead of the normal 3-minute reset.
+- A table becomes dirty as soon as its party leaves. The dirty state lasts exactly 3 restaurant minutes, then the table becomes free automatically.
 
 **Events that force a re-solve:** new walk-in, reservation check-in, table → dirty, table → free, host lock/unlock/drag, no-show, slider move, kitchen-delay flag.
 
@@ -206,7 +208,7 @@ One screen. No settings maze.
 
 **Agent strip** (under the top bar, not a chat dump). Current plan in one line plus “why” on the last commit. Tool names can show as quiet chips (`assign_table V3 ← Diaz`) so judges see WebMCP fire.
 
-**Empty states.** Before 6:00 the floor is mostly free, holds start to light. After 9:00 walk-ins dry up and the scoreboard freezes for the recap.
+**Empty states.** From 5:00 to the first 5:15 seating the floor is mostly free and tentative holds begin to light. After 9:30 walk-ins taper off; at 10:00 the scoreboard freezes for the recap.
 
 ---
 
@@ -259,6 +261,8 @@ Not a forecast. Live, labeled.
 - **Preference hit rate:** % of requested chips matched at seating.
 - **Wait P50 / P90** for walk-ins.
 
+At 10:00 PM, freeze an explicitly unofficial **Host Stand service score** from five labeled components: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence. Show assignment counts and covers by `HOST` / `ALG` / named external `AI`, the measured result of each service-brief directive, and a comparison with the local algorithm replaying the same random seed and Sat/Turn weights.
+
 These are the demo’s “how well this works” chart. When the host drags the slider toward Turn, wait P90 should drop and pref hit rate should drop. When they drag toward Sat, the opposite. If that does not happen, the optimizer is fake.
 
 ---
@@ -269,9 +273,9 @@ These are the demo’s “how well this works” chart. When the host drags the 
 2. **0:20–0:45** Press Start and 5x. Use next-event once or twice so the first parties arrive and the agent begins committing planned tables.
 3. **0:45–1:15** Click a non-primary candidate on an upcoming party. The chip becomes **HOST**; when that party arrives, the host plan commits and the movement animation lands on the chosen table.
 4. **1:15–1:45** Toggle to **Manual floor**, jump to a walk-in, and drag the waiting row onto a legal table. No automatic candidates or assignments appear while manual mode is active.
-5. **1:45–2:10** Return to Local optimizer. Lock a table or mark one dirty/ready and show the event-driven full-floor review in the activity ledger.
+5. **1:45–2:10** Return to Local algorithm. Lock a table or mark one dirty/ready and show the event-driven full-floor review in the activity ledger.
 6. **2:10–2:35** Open **Connect AI** and attach a WebMCP-capable agent. Show `get_floor`, `get_queue`, `score_assignment`, and a write such as `set_candidates` or `assign_table` updating the same board.
-7. **2:35–3:00** Expand simulation details, run a Sat/Turn preset, pause the clock, and recap expected finishes, preferences, live metrics, and tool calls.
+7. **2:35–3:00** Jump to 10:00 PM and show the service score, same-seed local baseline, assignment provenance, and service-brief results. State that this is the demo’s metric, not the OpenAI judging score.
 
 Audio on the video names the tools.
 
@@ -281,7 +285,7 @@ Audio on the video names the tools.
 
 - Real OpenTable / Resy / POS.
 - Guest-facing waitlist SMS.
-- Staffing, server sections, tip-out.
+- Full staffing schedules and tip-out. Named server sections exist only as table-allocation context in the random service brief.
 - Combinable tables (four 2-tops → 8) except: adjacent counter stools already defined as pairable.
 - Multi-room beyond P1/P2 as marked.
 - Learning / historical guest graph beyond `is_regular`.

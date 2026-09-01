@@ -14,6 +14,7 @@ import {
   getNextEventMinute,
   getParty,
   getReservationPriorityBlocker,
+  getServiceRecap,
   getTable,
   lockTable,
   markParty,
@@ -44,6 +45,8 @@ let carryMinutes = 0;
 let lastRealTick = performance.now();
 let lastAnimatedActivity = null;
 let resetQueueViewport = false;
+let recapClosedForRun = null;
+const localBaselineCache = new Map();
 
 const icons = {
   pause: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
@@ -57,6 +60,7 @@ const icons = {
   close: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>',
   check: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>',
   warning: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18v.01"/></svg>',
+  clock: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   chevron: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>'
 };
 
@@ -72,7 +76,89 @@ const escapeHtml = (value) => String(value ?? "")
 const formatPercent = (value) => value == null ? "—" : `${Math.round(value * 100)}%`;
 const formatNumber = (value) => value == null ? "—" : String(Math.round(value));
 
-const AGENT_PROMPT = "Attach to Host Stand as my external table-allocation agent in autonomous mode. Call attach_agent, then read get_floor and get_queue. Maintain ranked tentative tables for every reservation inside the 45-minute planning horizon and every waiting party. Always seat a waiting reservation before any walk-in whenever the reservation has a legal available table; only a human host may override that order. Reassess immediately whenever agentReview.status is review_due, after every write, and at the 10-minute heartbeat. Respect hostOverrideTableId as fixed. Use set_candidates to publish each plan; autonomous candidates execute at arrival or their deadline if the host does not override.";
+const AGENT_PROMPT = "Attach to Host Stand as my external table-allocation agent in autonomous mode. Call attach_agent, then read get_floor and get_queue. Treat serviceBrief as soft whole-floor context and hard legality plus reservation priority as non-negotiable unless the human host overrides. Maintain up to three ranked tentative tables for every reservation inside the 45-minute planning horizon and every waiting party. Include a concise reason with set_candidates and assign_table so the host can audit each choice. Reassess whenever agentReview.status is review_due, after every write, and at the 10-minute heartbeat. Respect hostOverrideTableId as fixed. Autonomous candidates execute at arrival or their deadline if the host does not override.";
+
+function serviceBriefLabel(directive) {
+  if (directive.type === "section_load") {
+    return `${directive.server} overloaded · ${minutesToTime(directive.from).replace(" PM", "")}–${minutesToTime(directive.until).replace(" PM", "")}`;
+  }
+  if (directive.type === "party_proximity") return `${directive.partyNames.join(" + ")} nearby`;
+  return directive.text;
+}
+
+function renderServiceBrief() {
+  const directives = state.serviceBrief?.directives || [];
+  return `
+    <div class="service-brief" aria-label="Tonight’s seating brief">
+      <strong>Service brief</strong>
+      ${directives.map((directive) => `<span title="${escapeHtml(directive.text)}">${escapeHtml(serviceBriefLabel(directive))}</span>`).join("")}
+    </div>
+  `;
+}
+
+function getLocalBaselineRecap() {
+  const cacheKey = `${state.scenarioSeed}:${state.weights.sat}:${state.weights.turn}`;
+  if (localBaselineCache.has(cacheKey)) return localBaselineCache.get(cacheKey);
+  const baseline = createInitialState({
+    scenarioSeed: state.scenarioSeed,
+    randomizeScenario: true,
+    agentEnabled: true
+  });
+  baseline.weights = { ...state.weights };
+  runAgentCycle(baseline, { reason: "baseline objective", log: false, allowAutoCommit: false });
+  advanceTo(baseline, SERVICE_END);
+  const recap = getServiceRecap(baseline);
+  localBaselineCache.set(cacheKey, recap);
+  return recap;
+}
+
+function renderServiceRecap() {
+  if (state.now < SERVICE_END) return "";
+  const recap = getServiceRecap(state);
+  const baseline = getLocalBaselineRecap();
+  const delta = recap.score - baseline.score;
+  const comparison = delta === 0
+    ? "Matches the same-night local baseline"
+    : `${Math.abs(delta)} point${Math.abs(delta) === 1 ? "" : "s"} ${delta > 0 ? "above" : "below"} the same-night local baseline`;
+  return `
+    <dialog class="recap-dialog" id="service-recap" aria-labelledby="recap-title">
+      <div class="recap-dialog__head">
+        <div>
+          <span class="command-kicker">SERVICE COMPLETE · ${escapeHtml(state.runCode)}</span>
+          <h2 id="recap-title">How the floor performed</h2>
+          <p>${escapeHtml(comparison)} · baseline ${baseline.score}/100</p>
+        </div>
+        <div class="recap-grade" aria-label="Grade ${recap.grade}, ${recap.score} out of 100"><strong>${recap.grade}</strong><span>${recap.score}/100</span></div>
+      </div>
+      <div class="recap-components" aria-label="Score components">
+        ${recap.components.map((component) => `
+          <div>
+            <span>${escapeHtml(component.label)}</span>
+            <b>${Math.round(component.value * 100)}%</b>
+            <i aria-hidden="true"><span style="--recap-value:${Math.round(component.value * 100)}%"></span></i>
+            <small>${component.points} points · ${Math.round(component.weight * 100)}% weight</small>
+          </div>
+        `).join("")}
+      </div>
+      <div class="recap-details">
+        <section>
+          <h3>Decision ownership</h3>
+          <p>${recap.partiesServed}/${recap.eligibleParties} parties seated · ${recap.coversServed} covers</p>
+          <ul>${recap.provenance.length ? recap.provenance.map((origin) => `<li><strong>${escapeHtml(origin.label)}</strong><span>${origin.assignments} assignments · ${origin.covers} covers</span></li>`).join("") : "<li>No assignments recorded</li>"}</ul>
+        </section>
+        <section>
+          <h3>Service brief</h3>
+          <ul>${recap.briefResults.map((result) => `<li><strong>${Math.round(result.value * 100)}%</strong><span>${escapeHtml(result.result)}</span></li>`).join("")}</ul>
+        </section>
+      </div>
+      <p class="recap-formula">Demo score—not an OpenAI judging score. ${escapeHtml(recap.formula)}.</p>
+      <div class="recap-actions">
+        <button class="control control--quiet" type="button" data-action="close-recap">Return to floor</button>
+        <button class="control recap-actions__primary" type="button" data-action="reset-night">Start a new random run</button>
+      </div>
+    </dialog>
+  `;
+}
 
 function agentReviewPresentation() {
   if (state.controllerMode === "manual") {
@@ -95,7 +181,7 @@ function agentReviewPresentation() {
   const justReviewed = state.agentReview.lastReviewAt === state.now;
   const label = state.agentReview.status === "planned" && justReviewed
     ? "Plan updated"
-    : state.agentReview.status === "observing" ? "Observing" : "Optimizer ready";
+    : state.agentReview.status === "observing" ? "Algorithm observing" : "Algorithm ready";
   return {
     label,
     detail: state.agentReview.nextReviewAt == null ? "Event-driven" : `Next review ${minutesToTime(state.agentReview.nextReviewAt)}`,
@@ -122,7 +208,13 @@ function captureAgentAssignment() {
   const party = table?.partyId ? getParty(state, table.partyId) : null;
   const row = party ? root.querySelector(`.party-row[data-party-id="${CSS.escape(party.id)}"]`) : null;
   if (!party || !row) return null;
-  return { party: { id: party.id, name: party.name, size: party.size }, tableId, from: row.getBoundingClientRect(), signature };
+  return {
+    party: { id: party.id, name: party.name, size: party.size },
+    tableId,
+    origin: party.assignmentOrigin,
+    from: row.getBoundingClientRect(),
+    signature
+  };
 }
 
 function animateAgentAssignment(transition) {
@@ -134,7 +226,7 @@ function animateAgentAssignment(transition) {
   const marker = document.createElement("div");
   marker.className = "assignment-flight";
   marker.setAttribute("aria-hidden", "true");
-  marker.innerHTML = `<span>AI</span><strong>${escapeHtml(transition.party.name)}</strong><small>→ ${escapeHtml(transition.tableId)}</small>`;
+  marker.innerHTML = `<span>${transition.origin?.kind === "local" ? "ALG" : "AI"}</span><strong>${escapeHtml(transition.party.name)}</strong><small>→ ${escapeHtml(transition.tableId)}</small>`;
   marker.style.left = `${transition.from.left}px`;
   marker.style.top = `${transition.from.top}px`;
   marker.style.width = `${Math.min(transition.from.width, 220)}px`;
@@ -201,9 +293,10 @@ function resetNight() {
   carryMinutes = 0;
   lastRealTick = performance.now();
   lastAnimatedActivity = null;
+  recapClosedForRun = null;
   resetQueueViewport = true;
   feedback = {
-    message: `New random run ${fresh.runCode} generated. Service is paused at 5:45 PM${previousConnection ? `; ${previousConnection.name} remains attached.` : "."}`,
+    message: `New random run ${fresh.runCode} generated. Service is paused at ${minutesToTime(SERVICE_START)}${previousConnection ? `; ${previousConnection.name} remains attached.` : "."}`,
     tone: "success"
   };
 }
@@ -303,9 +396,16 @@ function candidateRank(tableId, party) {
 function renderTable(table, activeParty) {
   const rank = candidateRank(table.id, activeParty);
   const selected = selectedTableId === table.id;
-  const dueText = table.status === "seated" && table.dueAt
-    ? `Expected ${minutesToTime(table.dueAt)}`
-    : statusLabel(table);
+  const expectedFinish = table.status === "seated" && table.dueAt ? minutesToTime(table.dueAt) : null;
+  const dirtyMinutes = table.status === "dirty" && table.dirtyUntil
+    ? Math.max(1, table.dirtyUntil - state.now)
+    : null;
+  const tableStatus = expectedFinish
+    ? `<span class="table-status table-status--due" title="Expected finish ${escapeHtml(expectedFinish)}">${icon("clock")}<time>${escapeHtml(expectedFinish.replace(" PM", ""))}</time></span>`
+    : `<span class="table-status ${dirtyMinutes != null ? "table-status--dirty" : ""}">${escapeHtml(dirtyMinutes != null ? `Dirty ${dirtyMinutes}m` : statusLabel(table))}</span>`;
+  const originBadge = table.status === "seated" && table.assignmentOrigin
+    ? `<span class="table-provenance is-${escapeHtml(table.assignmentOrigin.kind)}" title="${escapeHtml(`${table.assignmentOrigin.label}: ${table.assignmentReason || "Assignment recorded"}`)}">${table.assignmentOrigin.kind === "host" ? "HOST" : table.assignmentOrigin.kind === "local" ? "ALG" : "AI"}</span>`
+    : "";
   const classes = [
     "table-node",
     `table-node--${table.shape}`,
@@ -315,7 +415,13 @@ function renderTable(table, activeParty) {
     rank === 1 ? "is-first-candidate" : "",
     selected ? "is-selected" : ""
   ].filter(Boolean).join(" ");
-  const aria = `${table.id}, ${table.seats} seats, ${table.zone}, ${statusLabel(table)}. ${tableSecondary(table)}.${rank ? ` Candidate ${rank} for ${activeParty.name}.` : ""}`;
+  const timingAria = expectedFinish
+    ? ` Expected finish ${expectedFinish}.`
+    : dirtyMinutes != null ? ` Ready in ${dirtyMinutes} ${dirtyMinutes === 1 ? "minute" : "minutes"}.` : "";
+  const provenanceAria = table.assignmentOrigin
+    ? ` Assigned by ${table.assignmentOrigin.label}. ${table.assignmentReason || ""}`
+    : "";
+  const aria = `${table.id}, ${table.seats} seats, ${table.zone}, ${statusLabel(table)}. ${tableSecondary(table)}.${timingAria}${provenanceAria}${rank ? ` Candidate ${rank} for ${activeParty.name}.` : ""}`;
 
   return `
     <button
@@ -330,17 +436,19 @@ function renderTable(table, activeParty) {
     >
       ${rank ? `<span class="candidate-rank" aria-hidden="true">${rank}</span>` : ""}
       ${table.locked ? `<span class="table-lock" aria-hidden="true">${icon("lock")}</span>` : ""}
+      ${originBadge}
       <span class="table-id">${table.id}</span>
       <span class="table-party">${escapeHtml(tableSecondary(table))}</span>
-      <span class="table-status">${escapeHtml(dueText)}</span>
+      ${tableStatus}
     </button>
   `;
 }
 
 function preferenceChips(party) {
-  const chips = [...party.preferences];
+  const chips = [];
   if (party.children) chips.push(`${party.children} kids`);
   if (party.needsAccessible) chips.push("accessible");
+  chips.push(...party.preferences);
   if (party.isRegular) chips.push("regular");
   return chips.length
     ? chips.map((preference) => `<span class="preference-chip">${escapeHtml(PREFERENCE_LABELS[preference] || preference)}</span>`).join("")
@@ -390,7 +498,10 @@ function candidateStateLabel(party) {
   if (party.committedTableId) return "Committed";
   if (party.hostOverrideTableId) return "Host override";
   if (getReservationPriorityBlocker(state, party)) return "After reservation";
-  if (party.candidateState === "tentative") return party.candidateFrozen ? "Agent plan · locked" : "Agent plan";
+  if (party.candidateState === "tentative") {
+    const owner = state.controllerMode === "external" ? "AI plan" : "Algorithm plan";
+    return party.candidateFrozen ? `${owner} · locked` : owner;
+  }
   return party.status === "waiting" ? "Seat now" : "Potential";
 }
 
@@ -481,7 +592,7 @@ function renderParty(party) {
       </div>
       <div class="party-row__meta">
         <div class="preference-list">${preferenceChips(party)}</div>
-        <div class="candidate-list" aria-label="Suggested tables">
+        <div class="candidate-list" aria-label="Suggested tables" ${party.candidateReason ? `title="${escapeHtml(party.candidateReason)}"` : ""}>
           <span class="candidate-list__label">${candidateStateLabel(party)}</span>
           ${candidateButtons(party)}
         </div>
@@ -524,6 +635,7 @@ function renderInspector(activeParty) {
         <div class="inspector__state">
           <span class="status-mark status-mark--${table.status}"></span>
           ${escapeHtml(statusLabel(table))}${assignedParty ? ` · ${escapeHtml(assignedParty.name)} · expected finish ${minutesToTime(table.dueAt)}` : ""}
+          ${assignedParty?.assignmentOrigin ? `<small><strong>${escapeHtml(assignedParty.assignmentOrigin.label)}</strong> · ${escapeHtml(assignedParty.assignmentReason || "Assignment recorded")}</small>` : ""}
         </div>
         <div class="inspector__actions">
           <button class="control control--quiet" type="button" data-action="toggle-lock" data-table-id="${table.id}">
@@ -562,6 +674,7 @@ function renderInspector(activeParty) {
           <span>${escapeHtml([operation, constraint].filter(Boolean).join(" · "))}</span>
         </div>
         <div class="inspector__state">${escapeHtml(instruction)}</div>
+        ${activeParty.candidateReason ? `<div class="inspector__reason"><strong>Plan reason</strong><span>${escapeHtml(activeParty.candidateReason)}</span></div>` : ""}
         <button class="control control--quiet" type="button" data-action="clear-selection">Clear</button>
       </aside>
     `;
@@ -616,7 +729,12 @@ function renderAgentConnector() {
       <div class="agent-connect-panel__copy">
         <span class="command-kicker">EXTERNAL AGENT</span>
         <strong>${connection ? `${escapeHtml(connection.name)} is attached` : "Attach through WebMCP"}</strong>
-        <p>${connection ? `${escapeHtml(connection.mode)} mode · connection stays attached across new random runs.` : `${capability} The external AI replaces the local optimizer while manual drag-and-drop remains available.`}</p>
+        <p>${connection ? `${escapeHtml(connection.mode)} mode · connection stays attached across new random runs.` : `${capability} No API key is needed: the WebMCP-capable browser agent supplies the model. Open this deployed page there, paste the prompt, and watch its named decisions appear on the floor.`}</p>
+        <div class="controller-mode-guide" aria-label="Available controller modes">
+          <span class="${state.controllerMode === "manual" ? "is-current" : ""}"><b>Manual host</b><small>Drag on arrival</small></span>
+          <span class="${state.controllerMode === "local" ? "is-current" : ""}"><b>Local algorithm</b><small>Deterministic baseline</small></span>
+          <span class="${state.controllerMode === "external" ? "is-current" : ""}"><b>External AI</b><small>WebMCP decisions</small></span>
+        </div>
       </div>
       ${connection ? `
         <button class="control agent-connect-panel__primary" type="button" data-action="disconnect-agent">Disconnect</button>
@@ -674,14 +792,16 @@ function render() {
   const clockAction = state.running ? "Pause" : state.now === SERVICE_START ? "Start" : "Resume";
   const controllerLabel = state.controllerMode === "external"
     ? state.agentConnection?.name || "External agent"
-    : state.agentEnabled ? "Local optimizer" : "Manual floor";
-  const planLabel = state.controllerMode === "external" ? "External agent" : state.agentEnabled ? "Local optimizer" : "Manual service";
+    : state.agentEnabled ? "Local algorithm" : "Manual host";
+  const planLabel = state.controllerMode === "external" ? "External AI" : state.agentEnabled ? "Local algorithm" : "Manual host";
   const planText = state.controllerMode === "manual"
     ? "Allocation automation is off. Assign arrived parties by drag or select-then-table; all hard constraints still apply."
     : state.plan;
   const hostGuidance = state.controllerMode === "manual"
     ? "Manual · arrived parties only."
-    : "Agent plans · drag, tap chip, or select.";
+    : state.controllerMode === "external"
+      ? "AI plans · drag to override."
+      : "Algorithm plans · drag to override.";
   const reviewPresentation = agentReviewPresentation();
   const queueCount = queueParties.length;
 
@@ -722,6 +842,7 @@ function render() {
             </button>
             <button class="control agent-connect-control" type="button" data-action="open-agent-panel" data-focus-key="agent-connect">${state.agentConnection ? "Agent" : "Connect AI"}</button>
             <button class="control reset-control" type="button" data-action="reset-night" data-focus-key="reset-night" title="Clear the floor and generate a different service scenario">New run</button>
+            ${state.now >= SERVICE_END ? '<button class="control" type="button" data-action="open-recap" data-focus-key="open-recap">Review score</button>' : ""}
             <button class="command-trigger" type="button" data-action="open-palette" data-focus-key="command-trigger" aria-label="Open service commands">
               ${icon("command")}<kbd>⌘K</kbd>
             </button>
@@ -777,6 +898,7 @@ function render() {
               <span>${escapeHtml(reviewPresentation.meta)}</span>
               ${state.controllerMode === "local" ? `<span>Full review every ${AGENT_HEARTBEAT_MINUTES}m + floor events</span>` : ""}
             </div>
+            ${renderServiceBrief()}
           </div>
           <div class="tool-chips" aria-label="Recent tool calls">${activityChips}</div>
         </div>
@@ -841,6 +963,7 @@ function render() {
 
     <div class="sr-only" aria-live="polite" id="service-live">${escapeHtml(feedback?.message || state.plan)}</div>
     ${renderCommandPalette()}
+    ${renderServiceRecap()}
   `;
   root.setAttribute("aria-busy", "false");
 
@@ -850,6 +973,12 @@ function render() {
     interactionHold = false;
     render();
   }, { once: true });
+
+  const recapDialog = root.querySelector("#service-recap");
+  recapDialog?.addEventListener("close", () => {
+    recapClosedForRun = state.runCode;
+  }, { once: true });
+  if (recapDialog && recapClosedForRun !== state.runCode && !recapDialog.open) recapDialog.showModal();
 
   if (focusedKey) {
     root.querySelector(`[data-focus-key="${CSS.escape(focusedKey)}"]`)?.focus({ preventScroll: true });
@@ -910,6 +1039,16 @@ root.addEventListener("click", (event) => {
     if (!hostActionForParty(getParty(state, selectedPartyId))) selectedPartyId = null;
   }
   if (action === "reset-night") resetNight();
+  if (action === "open-recap") {
+    recapClosedForRun = null;
+    render();
+    return;
+  }
+  if (action === "close-recap") {
+    recapClosedForRun = state.runCode;
+    target.closest("dialog")?.close();
+    return;
+  }
   if (action === "open-agent-panel") agentPanelOpen = true;
   if (action === "close-agent-panel") agentPanelOpen = false;
   if (action === "toggle-simulation-panel") simulationPanelOpen = !simulationPanelOpen;

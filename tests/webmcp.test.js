@@ -51,6 +51,7 @@ test("WebMCP input validation rejects missing, extra, mistyped, and oversized ar
   assert.equal(validateToolInput(getFloor.inputSchema, {}).ok, true);
   assert.equal((await execute("get_floor", { unexpected: true })).error.code, "INVALID_INPUT");
   assert.equal((await execute("set_candidates", { party_id: "patel" })).error.code, "INVALID_INPUT");
+  assert.equal((await execute("set_candidates", { party_id: "patel", table_ids: ["V1", "V2", "V3", "V4"] })).error.code, "INVALID_INPUT");
   assert.equal((await execute("quote_wait", { party_id: "patel", minutes: "ten" })).error.code, "INVALID_INPUT");
   assert.equal((await execute("lock_table", { table_id: "V1", reason: "x".repeat(161) })).error.code, "INVALID_INPUT");
 });
@@ -63,10 +64,12 @@ test("an external agent can plan, mutate, verify, and recover through tools only
   assert.equal(initialFloor.tables.length, 33);
   assert.equal(initialFloor.capacity, 120);
   assert.equal(initialFloor.tableUnitCount, 33);
-  assert.equal(initialFloor.clock, "5:45 PM");
+  assert.equal(initialFloor.clock, "5:00 PM");
   assert.equal(initialFloor.agentCadence.heartbeatMinutes, 10);
   assert.equal(initialFloor.agentCadence.planningHorizonMinutes, 45);
   assert.equal(initialFloor.agentCadence.freezeWindowMinutes, 5);
+  assert.equal(initialFloor.serviceBrief.directives.length, 2);
+  assert.ok(initialFloor.nextRecommendedActions.length >= 1);
 
   assert.equal((await execute("set_clock", { time: "6:00 PM", running: false })).ok, true);
   const queue = await execute("get_queue");
@@ -107,10 +110,17 @@ test("an external AI can attach explicitly and own autonomous candidate deadline
   assert.equal(state.agentConnection.name, "Table Pilot");
 
   await execute("set_clock", { time: "6:00 PM", running: false });
-  assert.equal((await execute("set_candidates", { party_id: "patel", table_ids: ["V1", "V2"], auto_assign_at: "6:03 PM" })).ok, true);
+  assert.equal((await execute("set_candidates", {
+    party_id: "patel",
+    table_ids: ["V1", "V2"],
+    reason: "Protect the four-tops and keep the reservation near its requested area.",
+    auto_assign_at: "6:03 PM"
+  })).ok, true);
   await execute("set_clock", { time: "6:03 PM", running: false });
   assert.equal(state.parties.find((party) => party.id === "patel").status, "seated");
   assert.equal(state.tables.find((table) => table.id === "V1").partyId, "patel");
+  assert.deepEqual(state.tables.find((table) => table.id === "V1").assignmentOrigin, { kind: "external", label: "Table Pilot" });
+  assert.match(state.tables.find((table) => table.id === "V1").assignmentReason, /Protect the four-tops/);
 
   assert.equal((await execute("detach_agent")).ok, true);
   assert.equal(state.controllerMode, "manual");

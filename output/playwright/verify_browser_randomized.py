@@ -37,6 +37,10 @@ def main():
         assert page.locator(".queue-section").count() == 1
         assert page.locator(".queue-section h2").inner_text() == "Upcoming parties"
         assert page.locator(".party-source--reservation").count() >= 8
+        floor_contract = page.evaluate("async () => window.hostStandInvokeTool('get_floor', {})")
+        assert [directive["type"] for directive in floor_contract["serviceBrief"]["directives"]] == ["section_load", "party_proximity"]
+        assert page.locator(".service-brief span").count() == 2
+        assert "local algorithm" in page.locator(".product-bar").inner_text().lower()
         source_key_text = " ".join(page.locator(".queue-source-key").inner_text().split())
         assert "Reservation first" in source_key_text, source_key_text
         assert "Walk-in after" in source_key_text, source_key_text
@@ -45,6 +49,7 @@ def main():
         assert viewport_fit["floorHeight"] <= 482, viewport_fit
         assert viewport_fit["tableHeight"] <= 52, viewport_fit
         results.append("randomized floor fits 33 compact table units and one mixed-source queue without page scroll")
+        results.append("the visible service brief contains only measurable table-allocation constraints")
 
         for width, height in ((1024, 768), (1280, 800), (1440, 900)):
             page.set_viewport_size({"width": width, "height": height})
@@ -68,7 +73,6 @@ def main():
                 rect: table.getBoundingClientRect()
               }));
               return tables.flatMap((left, index) => tables.slice(index + 1).flatMap(right => {
-                if (!left.id.startsWith('D') && !right.id.startsWith('D')) return [];
                 const overlapX = Math.min(left.rect.right, right.rect.right) - Math.max(left.rect.left, right.rect.left);
                 const overlapY = Math.min(left.rect.bottom, right.rect.bottom) - Math.max(left.rect.top, right.rect.top);
                 return overlapX > 1 && overlapY > 1 ? [`${left.id}/${right.id}`] : [];
@@ -76,7 +80,7 @@ def main():
             }""")
             assert collisions == [], f"table overlap at {width}x{height}: {collisions}"
         results.append("1024x768, 1280x800, and 1440x900 desktop layouts fit without page scroll")
-        results.append("all six new dining units remain clear of neighboring tables at every desktop test size")
+        results.append("all 33 table units remain clear of every neighboring table at each desktop test size")
         results.append("south tables keep a clear lane above the kitchen pass")
 
         initial_at = page.locator(".clock-readout time").inner_text()
@@ -103,7 +107,7 @@ def main():
         second_roster = page.evaluate("async () => (await window.hostStandInvokeTool('get_queue', {})).reservations.map(p => [p.id, p.size, p.reservedFor])")
         assert second_run != first_run
         assert second_roster != first_roster
-        assert page.locator(".clock-readout time").inner_text() == "5:45 PM"
+        assert page.locator(".clock-readout time").inner_text() == "5:00 PM"
         assert "New random run" in page.locator(".toast").inner_text()
         results.append("New run produces a different paused service and confirms the reset")
 
@@ -161,6 +165,7 @@ def main():
         drag_plan_table = page.evaluate("""async partyId => {
           const floor = await window.hostStandInvokeTool('get_floor', {});
           for (const table of floor.tables) {
+            if (table.status !== 'free' || table.locked) continue;
             const score = await window.hostStandInvokeTool('score_assignment', {party_id: partyId, table_id: table.id});
             if (score.legal) return table.id;
           }
@@ -206,6 +211,7 @@ def main():
         legal_table_id = page.evaluate("""async partyId => {
           const floor = await window.hostStandInvokeTool('get_floor', {});
           for (const table of floor.tables) {
+            if (table.status !== 'free' || table.locked) continue;
             const score = await window.hostStandInvokeTool('score_assignment', {party_id: partyId, table_id: table.id});
             if (score.legal) return table.id;
           }
@@ -219,26 +225,34 @@ def main():
                 break
             page.wait_for_timeout(50)
         assert waiting_name in legal_table.inner_text()
+        assert legal_table.locator(".table-provenance").inner_text() == "HOST"
+        assert "Manual host override" in legal_table.locator(".table-provenance").get_attribute("title")
         results.append("manual mode waits for a real arrival and seats it through drag-and-drop")
+        results.append("manual overrides remain visibly attributed on the assigned table")
 
         page.locator(".reset-control").click()
         page.locator('[data-action="open-agent-panel"]').click()
         assert "Attach through WebMCP" in page.locator(".agent-connect-panel").inner_text()
+        assert "No API key is needed" in page.locator(".agent-connect-panel").inner_text()
+        assert "Manual host" in page.locator(".controller-mode-guide").inner_text()
+        assert "Local algorithm" in page.locator(".controller-mode-guide").inner_text()
+        assert "External AI" in page.locator(".controller-mode-guide").inner_text()
         attached = page.evaluate("async () => window.hostStandInvokeTool('attach_agent', {agent_name: 'Browser QA', mode: 'autonomous'})")
         assert attached["ok"] is True
         assert "Browser QA is attached" in page.locator(".agent-connect-panel").inner_text()
 
         assignment = page.evaluate("""async () => {
           const queue = await window.hostStandInvokeTool('get_queue', {});
-          const party = queue.reservations[0];
-          await window.hostStandInvokeTool('mark_party', {party_id: party.id, status: 'arrived'});
           const floor = await window.hostStandInvokeTool('get_floor', {});
-          for (const table of floor.tables) {
-            const score = await window.hostStandInvokeTool('score_assignment', {party_id: party.id, table_id: table.id});
-            if (!score.legal) continue;
-            await window.hostStandInvokeTool('set_candidates', {party_id: party.id, table_ids: [table.id]});
-            const assigned = await window.hostStandInvokeTool('assign_table', {party_id: party.id, table_id: table.id});
-            return {partyName: party.name, tableId: table.id, assigned};
+          for (const party of queue.reservations.filter(candidate => candidate.size <= 2)) {
+            await window.hostStandInvokeTool('mark_party', {party_id: party.id, status: 'arrived'});
+            for (const table of floor.tables.filter(candidate => candidate.seats === 2)) {
+              const score = await window.hostStandInvokeTool('score_assignment', {party_id: party.id, table_id: table.id});
+              if (!score.legal) continue;
+              await window.hostStandInvokeTool('set_candidates', {party_id: party.id, table_ids: [table.id], reason: 'Right-sized table with no reservation conflict.'});
+              const assigned = await window.hostStandInvokeTool('assign_table', {party_id: party.id, table_id: table.id, reason: 'Right-sized table with no reservation conflict.'});
+              return {partyId: party.id, partyName: party.name, tableId: table.id, assigned};
+            }
           }
           return null;
         }""")
@@ -250,7 +264,57 @@ def main():
           return {minute: floor.minute, expectedFinishAt: table.expectedFinishAt};
         }""", assignment["tableId"])
         assert expected_finish["expectedFinishAt"] == expected_finish["minute"] + 90
-        results.append("external AI attaches, scores, plans, and assigns through WebMCP with a 90-minute finish")
+        page.set_viewport_size({"width": 1024, "height": 768})
+        page.wait_for_timeout(50)
+        small_table = page.locator(f'.table-node[data-table-id="{assignment["tableId"]}"]')
+        finish_status = small_table.locator(".table-status--due")
+        finish_fit = finish_status.evaluate("""status => {
+          const statusRect = status.getBoundingClientRect();
+          const tableRect = status.closest('.table-node').getBoundingClientRect();
+          return {
+            clientWidth: status.clientWidth,
+            scrollWidth: status.scrollWidth,
+            insideTable: statusRect.left >= tableRect.left && statusRect.right <= tableRect.right
+          };
+        }""")
+        assert finish_status.inner_text().strip().count(":") == 1
+        assert finish_fit["scrollWidth"] <= finish_fit["clientWidth"], finish_fit
+        assert finish_fit["insideTable"] is True, finish_fit
+        assert "Expected finish" in small_table.get_attribute("aria-label")
+        assert small_table.locator(".table-provenance").inner_text() == "AI"
+        assert "Browser QA" in small_table.locator(".table-provenance").get_attribute("title")
+        assert "Right-sized table" in small_table.locator(".table-provenance").get_attribute("title")
+        results.append("a seated 2-top keeps its full 90-minute expected finish visible without truncation")
+        results.append("external AI assignments show the named agent and its reason on the floor")
+
+        dirty_lifecycle = page.evaluate("""async ({partyId, tableId}) => {
+          const left = await window.hostStandInvokeTool('mark_party', {party_id: partyId, status: 'left'});
+          const dirty = await window.hostStandInvokeTool('get_floor', {});
+          const dirtyTable = dirty.tables.find(table => table.id === tableId);
+          const dirtyText = document.querySelector(`.table-node[data-table-id="${CSS.escape(tableId)}"] .table-status--dirty`)?.textContent.trim();
+          await window.hostStandInvokeTool('set_clock', {time: dirtyTable.dirtyUntil - 1, running: false});
+          const beforeReady = await window.hostStandInvokeTool('get_floor', {});
+          const beforeReadyText = document.querySelector(`.table-node[data-table-id="${CSS.escape(tableId)}"] .table-status--dirty`)?.textContent.trim();
+          await window.hostStandInvokeTool('set_clock', {time: dirtyTable.dirtyUntil, running: false});
+          const ready = await window.hostStandInvokeTool('get_floor', {});
+          return {
+            left,
+            dirtyMinute: dirty.minute,
+            dirtyTable,
+            dirtyText,
+            beforeReady: beforeReady.tables.find(table => table.id === tableId),
+            beforeReadyText,
+            ready: ready.tables.find(table => table.id === tableId)
+          };
+        }""", {"partyId": assignment["partyId"], "tableId": assignment["tableId"]})
+        assert dirty_lifecycle["left"]["ok"] is True
+        assert dirty_lifecycle["dirtyTable"]["status"] == "dirty"
+        assert dirty_lifecycle["dirtyTable"]["dirtyUntil"] == dirty_lifecycle["dirtyMinute"] + 3
+        assert dirty_lifecycle["dirtyText"] == "Dirty 3m"
+        assert dirty_lifecycle["beforeReady"]["status"] == "dirty"
+        assert dirty_lifecycle["beforeReadyText"] == "Dirty 1m"
+        assert dirty_lifecycle["ready"]["status"] == "free"
+        results.append("party departure starts a visible three-minute dirty state, then the table becomes ready")
 
         page.locator(".command-trigger").click()
         page.locator("#command-search").fill("busy")
@@ -266,6 +330,22 @@ def main():
         assert "Sat 35" in page.locator(".weight-console label").inner_text()
         assert "Turn 65" in page.locator(".weight-console label").inner_text()
         results.append("command search filters, closes with one Escape, and executes by keyboard")
+
+        page.evaluate("async () => window.hostStandInvokeTool('set_clock', {time: '10:00 PM', running: false})")
+        recap_dialog = page.locator("#service-recap")
+        assert recap_dialog.evaluate("dialog => dialog.open") is True
+        assert "How the floor performed" in recap_dialog.inner_text()
+        assert "same-night local baseline" in recap_dialog.inner_text()
+        assert recap_dialog.locator(".recap-components > div").count() == 5
+        assert recap_dialog.locator(".recap-details section").count() == 2
+        recap_contract = page.evaluate("async () => (await window.hostStandInvokeTool('get_floor', {})).serviceRecap")
+        assert recap_contract["official"] is False
+        assert 0 <= recap_contract["score"] <= 100
+        assert len(recap_contract["briefResults"]) == 2
+        recap_dialog.get_by_role("button", name="Return to floor").click()
+        page.wait_for_function("() => !document.querySelector('#service-recap').open")
+        assert recap_dialog.evaluate("dialog => dialog.open") is False
+        results.append("10 PM opens a transparent scorecard with local-baseline comparison, provenance, and brief adherence")
 
         for width in (320, 375, 414, 768):
             page.set_viewport_size({"width": width, "height": 900})

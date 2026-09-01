@@ -139,14 +139,14 @@ export function createToolDefinitions({ state, clock, onChange }) {
     },
     {
       name: "get_floor",
-      description: "Read the current restaurant floor, service clock, table states, locks, holds, 90-minute expected finish times, weights, and live metrics. Use this after every write instead of scraping the floor UI.",
+      description: "Read the current restaurant floor, service clock, table states, locks, holds, 90-minute expected finish times, measurable service brief, assignment provenance, next recommended actions, weights, and live metrics. At 10 PM this also includes the final service recap. Use this after every write instead of scraping the floor UI.",
       inputSchema: objectSchema(),
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute: () => getFloorSnapshot(state)
     },
     {
       name: "get_queue",
-      description: "Read upcoming reservations and waiting walk-ins with party size, preferences, tentative or committed tables, host overrides, planning-horizon state, auto-assignment deadlines, and the reservation-first service policy. A waiting walk-in includes reservationPriorityBlockedBy when it must wait behind a reservation.",
+      description: "Read the seating brief plus upcoming reservations and waiting walk-ins with party size, preferences, tentative or committed tables, plan reasons, host overrides, planning-horizon state, auto-assignment deadlines, recommended next actions, and the reservation-first service policy. A waiting walk-in includes reservationPriorityBlockedBy when it must wait behind a reservation.",
       inputSchema: objectSchema(),
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute: () => getQueueSnapshot(state)
@@ -166,31 +166,36 @@ export function createToolDefinitions({ state, clock, onChange }) {
     },
     {
       name: "set_candidates",
-      description: "Post one to four ranked legal candidate tables for an upcoming reservation or waiting party. Plan waiting reservations before walk-ins. The first table is tentative and becomes the autonomous assignment at arrival or after the five-minute host-override window, but walk-in commitment pauses while a waiting reservation has a legal available table. A host override is a hard constraint.",
+      description: "Post one to three ranked legal candidate tables plus a concise whole-floor reason for an upcoming reservation or waiting party. Plan waiting reservations before walk-ins. The first table is tentative and becomes the autonomous assignment at arrival or after the five-minute host-override window, but walk-in commitment pauses while a waiting reservation has a legal available table. A host override is a hard constraint.",
       inputSchema: objectSchema(
         {
           party_id: stringId("Upcoming reservation or waiting party id."),
-          table_ids: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: { type: "string" }, description: "Ranked table ids, best first." },
+          table_ids: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true, items: { type: "string" }, description: "Ranked table ids, best first." },
+          reason: { type: "string", minLength: 2, maxLength: 180, description: "Concise reason that references fit, timing, reservation priority, or a service-brief tradeoff." },
           auto_assign_at: { oneOf: [{ type: "number" }, { type: "string" }], description: "Restaurant minute or clock time such as 6:25 PM. Waiting parties default to now + 5 minutes; upcoming reservations execute when they arrive." }
         },
         ["party_id", "table_ids"]
       ),
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute: ({ party_id, table_ids, auto_assign_at }) => mutate(() => {
+      execute: ({ party_id, table_ids, reason, auto_assign_at }) => mutate(() => {
         const parsed = auto_assign_at == null ? null : parseTime(auto_assign_at);
         if (auto_assign_at != null && parsed == null) return { ok: false, error: { code: "INVALID_TIME", message: "Use a restaurant minute or a time such as 6:25 PM." } };
-        return setCandidates(state, party_id, table_ids, parsed, { source: "agent" });
+        return setCandidates(state, party_id, table_ids, parsed, { source: "agent", reason });
       })
     },
     {
       name: "assign_table",
-      description: "Commit a legal table to a waiting party. Always assign any waiting reservation with a legal available table before assigning a walk-in; automated walk-in attempts return RESERVATION_PRIORITY until that reservation is handled. Seats immediately when free; otherwise reserves the table as that party's next seating. Re-read get_floor after calling.",
+      description: "Commit a legal table to a waiting party and provide a concise visible reason. Always assign any waiting reservation with a legal available table before assigning a walk-in; automated walk-in attempts return RESERVATION_PRIORITY until that reservation is handled. Seats immediately when free; otherwise reserves the table as that party's next seating. Re-read get_floor after calling.",
       inputSchema: objectSchema(
-        { party_id: stringId("Waiting party id."), table_id: stringId("Destination table id.") },
+        {
+          party_id: stringId("Waiting party id."),
+          table_id: stringId("Destination table id."),
+          reason: { type: "string", minLength: 2, maxLength: 180, description: "Why this assignment is best for the whole floor right now." }
+        },
         ["party_id", "table_id"]
       ),
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute: ({ party_id, table_id }) => mutate(() => assignTable(state, party_id, table_id, { source: "agent" }))
+      execute: ({ party_id, table_id, reason }) => mutate(() => assignTable(state, party_id, table_id, { source: "agent", reason }))
     },
     {
       name: "move_party",

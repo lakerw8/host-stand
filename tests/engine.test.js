@@ -5,21 +5,26 @@ import {
   AGENT_FREEZE_WINDOW_MINUTES,
   AGENT_HEARTBEAT_MINUTES,
   AGENT_PLANNING_HORIZON_MINUTES,
+  TABLE_RESET_MINUTES,
   advanceTo,
   assignTable,
   checkAssignmentLegality,
   createInitialState,
   elapsedToSimMinutes,
+  getFloorSnapshot,
+  getMetrics,
   getParty,
   getReservationPriorityBlocker,
+  getServiceRecap,
   getTable,
   lockTable,
   runAgentCycle,
+  scoreAssignment,
   setCandidates,
   setHostCandidateOverride,
   setWeights
 } from "../src/engine.js";
-import { EXPECTED_DWELL_MINUTES, PARTY_SIZE_DISTRIBUTION, PREFERENCE_KEYS, RESTAURANT_CAPACITY, SERVICE_START, TABLE_DEFINITIONS, TABLE_UNIT_COUNT } from "../src/data.js";
+import { EXPECTED_DWELL_MINUTES, FIRST_SEATING, PARTY_SIZE_DISTRIBUTION, PREFERENCE_KEYS, RESTAURANT_CAPACITY, SERVICE_END, SERVICE_START, TABLE_DEFINITIONS, TABLE_UNIT_COUNT } from "../src/data.js";
 
 test("the expanded restaurant inventory is exactly 120 seats", () => {
   assert.equal(RESTAURANT_CAPACITY, 120);
@@ -31,9 +36,11 @@ test("the expanded restaurant inventory is exactly 120 seats", () => {
   );
 });
 
-test("service waits at 5:45 PM until Start is pressed", () => {
+test("service waits at 5:00 PM until Start is pressed and ends at 10:00 PM", () => {
   const state = createInitialState();
   assert.equal(state.now, SERVICE_START);
+  assert.equal(SERVICE_START, 17 * 60);
+  assert.equal(SERVICE_END, 22 * 60);
   assert.equal(state.running, false);
   assert.ok(getParty(state, "patel").candidateTableIds.length >= 1);
 });
@@ -71,14 +78,34 @@ test("random service runs replay by seed and vary parties, timing, constraints, 
 
   assert.deepEqual(first.parties, replay.parties);
   assert.deepEqual(first.events, replay.events);
+  assert.deepEqual(first.serviceBrief, replay.serviceBrief);
   assert.notDeepEqual(first.parties, next.parties);
   assert.notDeepEqual(first.events, next.events);
-  assert.ok(first.parties.length >= 20 && first.parties.length <= 28);
+  assert.equal(first.serviceBrief.directives.length, 2);
+  assert.deepEqual(first.serviceBrief.directives.map((directive) => directive.type), ["section_load", "party_proximity"]);
+  assert.ok(first.serviceBrief.directives.every((directive) => directive.text.length >= 30));
+  assert.ok(first.parties.length >= 84 && first.parties.length <= 96);
   assert.ok(first.parties.some((party) => party.source === "reservation"));
   assert.ok(first.parties.some((party) => party.source === "walk_in"));
   assert.ok(first.parties.some((party) => party.children > 0));
   assert.ok(first.parties.some((party) => party.needsAccessible));
   assert.deepEqual([...new Set(first.parties.map((party) => party.preferences.length))].sort(), [0, 1, 2, 3]);
+});
+
+test("the seating brief changes table scoring with an explicit operational reason", () => {
+  const state = createInitialState({ agentEnabled: false, preferenceSeed: "brief-scoring" });
+  const directive = state.serviceBrief.directives.find((entry) => entry.type === "section_load");
+  const party = getParty(state, "brooks");
+  party.status = "waiting";
+  party.children = 0;
+  party.needsAccessible = false;
+  state.now = directive.from;
+  const table = state.tables.find((candidate) => candidate.zone === directive.zone && candidate.seats >= party.size);
+  const scored = scoreAssignment(state, party.id, table.id, { forCandidate: true, source: "agent" });
+
+  assert.equal(scored.legal, true);
+  assert.equal(scored.serviceBriefAdjustment, -0.12);
+  assert.match(scored.serviceBriefReasons.join(" "), /overloaded/i);
 });
 
 test("random nights normalize party sizes around mostly two-tops and four-tops", () => {
@@ -102,6 +129,23 @@ test("random nights normalize party sizes around mostly two-tops and four-tops",
   }
 });
 
+test("busy random nights reach at least 80 percent table-seat utilization", () => {
+  for (let index = 0; index < 12; index += 1) {
+    const state = createInitialState({ scenarioSeed: `peak-capacity-${index}`, randomizeScenario: true });
+    let peakUtilization = getMetrics(state).utilization;
+
+    for (let minute = SERVICE_START + 1; minute <= SERVICE_END; minute += 1) {
+      advanceTo(state, minute);
+      peakUtilization = Math.max(peakUtilization, getMetrics(state).utilization);
+    }
+
+    assert.ok(
+      peakUtilization >= 0.8,
+      `${state.runCode} only reached ${Math.round(peakUtilization * 100)}% utilization`
+    );
+  }
+});
+
 test("service clock maps real seconds to restaurant minutes at 1x, 2x, and 5x", () => {
   assert.equal(elapsedToSimMinutes(1000, 1), 1);
   assert.equal(elapsedToSimMinutes(1000, 2), 2);
@@ -112,7 +156,7 @@ test("pre-planned reservations commit their tentative tables when they arrive", 
   const state = createInitialState();
   const patelPlan = getParty(state, "patel").candidateTableIds[0];
   const nguyenPlan = getParty(state, "nguyen").candidateTableIds[0];
-  const result = advanceTo(state, 18 * 60);
+  const result = advanceTo(state, FIRST_SEATING);
 
   assert.equal(result.ok, true);
   assert.equal(getParty(state, "patel").status, "seated");
@@ -124,12 +168,12 @@ test("pre-planned reservations commit their tentative tables when they arrive", 
 
 test("an arrived walk-in receives live table suggestions", () => {
   const state = createInitialState();
-  advanceTo(state, 18 * 60 + 12);
+  advanceTo(state, FIRST_SEATING + 12);
 
   const lee = getParty(state, "lee");
   assert.equal(lee.status, "waiting");
   assert.ok(lee.candidateTableIds.length >= 1);
-  assert.equal(lee.autoAssignAt, 18 * 60 + 12 + AGENT_FREEZE_WINDOW_MINUTES);
+  assert.equal(lee.autoAssignAt, FIRST_SEATING + 12 + AGENT_FREEZE_WINDOW_MINUTES);
 });
 
 test("the local agent reviews every ten restaurant minutes when no event intervenes", () => {
@@ -146,7 +190,7 @@ test("the local agent reviews every ten restaurant minutes when no event interve
 
 test("the agent sends a no-preference 2-top to a fast-turn zone instead of spending the view", () => {
   const state = createInitialState();
-  advanceTo(state, 18 * 60 + 12 + AGENT_FREEZE_WINDOW_MINUTES);
+  advanceTo(state, FIRST_SEATING + 12 + AGENT_FREEZE_WINDOW_MINUTES);
 
   const lee = getParty(state, "lee");
   const table = getTable(state, lee.committedTableId);
@@ -163,7 +207,7 @@ test("a host tentative-table override remains fixed and commits at reservation a
   assert.equal(getParty(state, "patel").candidateTableIds[0], "V1");
   assert.equal(getParty(state, "patel").candidateState, "host_override");
 
-  advanceTo(state, 18 * 60);
+  advanceTo(state, FIRST_SEATING);
   assert.equal(getParty(state, "patel").committedTableId, "V1");
   assert.equal(getParty(state, "patel").assignedBy, "agent");
 });
@@ -181,7 +225,7 @@ test("a floor event triggers an immediate full review between heartbeats", () =>
 
 test("manual mode never auto-assigns, while host assignment remains available", () => {
   const state = createInitialState({ agentEnabled: false });
-  advanceTo(state, 18 * 60 + 8);
+  advanceTo(state, FIRST_SEATING + 8);
   assert.equal(getParty(state, "patel").status, "waiting");
   assert.deepEqual(getParty(state, "patel").candidateTableIds, []);
 
@@ -226,7 +270,7 @@ test("walk-in automation resumes after the available reservation is seated", () 
 
 test("the local agent commits simultaneous deadlines in reservation-first order", () => {
   const state = createInitialState();
-  state.now = 18 * 60;
+  state.now = FIRST_SEATING;
   const reservation = getParty(state, "patel");
   const walkIn = getParty(state, "diaz");
   reservation.status = "waiting";
@@ -244,7 +288,7 @@ test("the local agent commits simultaneous deadlines in reservation-first order"
 
 test("children make non-high-chair tables illegal for agent and host", () => {
   const state = createInitialState({ agentEnabled: false });
-  advanceTo(state, 18 * 60 + 18);
+  advanceTo(state, FIRST_SEATING + 18);
 
   for (const tableId of ["B3", "B4", "S5", "C1", "C6"]) {
     const legality = checkAssignmentLegality(state, "haddad", tableId, { forCandidate: true, source: "host" });
@@ -256,7 +300,7 @@ test("children make non-high-chair tables illegal for agent and host", () => {
 
 test("candidate sets reject an illegal child seating before publication", () => {
   const state = createInitialState({ agentEnabled: false });
-  advanceTo(state, 18 * 60 + 18);
+  advanceTo(state, FIRST_SEATING + 18);
 
   const result = setCandidates(state, "haddad", ["B3", "V3"], state.now + 3, { source: "agent" });
   assert.equal(result.ok, false);
@@ -266,7 +310,7 @@ test("candidate sets reject an illegal child seating before publication", () => 
 
 test("a host lock is a hard constraint and forces candidate reflow", () => {
   const state = createInitialState({ agentEnabled: false });
-  advanceTo(state, 18 * 60);
+  advanceTo(state, FIRST_SEATING);
   lockTable(state, "V1", "Anniversary photo setup", { source: "host" });
 
   const result = assignTable(state, "patel", "V1", { source: "host" });
@@ -284,6 +328,16 @@ test("accessibility requirement filters every unmarked table", () => {
   assert.equal(checkAssignmentLegality(state, "cohen", "S2", { forCandidate: true }).legal, false);
   assert.equal(checkAssignmentLegality(state, "cohen", "S1", { forCandidate: true }).legal, true);
   assert.equal(checkAssignmentLegality(state, "cohen", "V3", { forCandidate: true }).legal, true);
+});
+
+test("a party of three can be seated at a four-seat table", () => {
+  const state = createInitialState({ agentEnabled: false });
+  const party = getParty(state, "cohen");
+  party.status = "waiting";
+
+  assert.equal(checkAssignmentLegality(state, party.id, "V3", { forCandidate: true, source: "host" }).legal, true);
+  assert.equal(assignTable(state, party.id, "V3", { source: "host" }).ok, true);
+  assert.equal(getTable(state, "V3").partyId, party.id);
 });
 
 test("host can override the private-room minimum but not table capacity", () => {
@@ -311,7 +365,7 @@ test("weight changes must total one and are stored for the next solve", () => {
   assert.equal(invalid.error.code, "INVALID_WEIGHTS");
 });
 
-test("a seated table progresses through dirty back to free", () => {
+test("a departed party leaves a table dirty for exactly three minutes", () => {
   const state = createInitialState({ agentEnabled: false });
   const party = getParty(state, "patel");
   party.status = "waiting";
@@ -322,8 +376,40 @@ test("a seated table progresses through dirty back to free", () => {
 
   advanceTo(state, dueAt);
   assert.equal(getTable(state, "V1").status, "dirty");
+  assert.equal(getTable(state, "V1").dirtyUntil, dueAt + TABLE_RESET_MINUTES);
   assert.equal(getParty(state, "patel").status, "left");
+  const dirtySnapshot = getFloorSnapshot(state).tables.find((table) => table.id === "V1");
+  assert.equal(dirtySnapshot.dirtyUntil, dueAt + TABLE_RESET_MINUTES);
+  assert.deepEqual(dirtySnapshot.likelyFree, {
+    earliest: dueAt + TABLE_RESET_MINUTES,
+    latest: dueAt + TABLE_RESET_MINUTES
+  });
 
-  advanceTo(state, dueAt + 8);
+  assert.equal(TABLE_RESET_MINUTES, 3);
+  advanceTo(state, dueAt + TABLE_RESET_MINUTES - 1);
+  assert.equal(getTable(state, "V1").status, "dirty");
+
+  advanceTo(state, dueAt + TABLE_RESET_MINUTES);
   assert.equal(getTable(state, "V1").status, "free");
+});
+
+test("assignment provenance and the end-of-service recap are auditable", () => {
+  const state = createInitialState({ agentEnabled: false });
+  const party = getParty(state, "patel");
+  party.status = "waiting";
+  const result = assignTable(state, party.id, "V1", { source: "host", reason: "Keep the reservation near the window." });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(getTable(state, "V1").assignmentOrigin, { kind: "host", label: "Host override" });
+  assert.equal(getTable(state, "V1").assignmentReason, "Keep the reservation near the window.");
+
+  advanceTo(state, SERVICE_END);
+  const recap = getServiceRecap(state);
+  assert.equal(recap.status, "complete");
+  assert.equal(recap.official, false);
+  assert.ok(recap.score >= 0 && recap.score <= 100);
+  assert.equal(recap.components.length, 5);
+  assert.equal(recap.briefResults.length, 2);
+  assert.equal(recap.provenance.find((origin) => origin.kind === "host").assignments, 1);
+  assert.equal(getFloorSnapshot(state).serviceRecap.score, recap.score);
 });

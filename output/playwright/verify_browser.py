@@ -69,7 +69,7 @@ def main():
         first_run = page.evaluate("async () => (await window.hostStandInvokeTool('get_floor', {})).runCode")
         first_roster = page.evaluate("async () => (await window.hostStandInvokeTool('get_queue', {})).reservations.map(p => [p.id, p.size, p.reservedFor])")
         page.locator('[data-action="reset-night"]').last.click()
-        assert page.locator(".clock-readout time").inner_text() == "5:45 PM"
+        assert page.locator(".clock-readout time").inner_text() == "5:00 PM"
         assert page.get_by_label("Start service clock").count() == 1
         assert page.locator(".reset-control").count() == 1
         second_run = page.evaluate("async () => (await window.hostStandInvokeTool('get_floor', {})).runCode")

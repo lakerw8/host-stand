@@ -147,7 +147,7 @@ def main():
         assert result["invalid"]["payload"]["error"]["code"] == "INVALID_INPUT"
         assert result["aborted"]["isError"] is True
         assert result["aborted"]["payload"]["error"]["code"] == "ABORTED"
-        assert result["reset"] == {"clock": "5:45 PM", "running": False, "runChanged": True, "controllerMode": "external", "agentName": "WebMCP Test Agent"}
+        assert result["reset"] == {"clock": "5:00 PM", "running": False, "runChanged": True, "controllerMode": "external", "agentName": "WebMCP Test Agent"}
         assert "WebMCP Test Agent attached" in page.locator(".mcp-status").inner_text()
         assert console_errors == [], f"browser console errors: {console_errors}"
         browser.close()
