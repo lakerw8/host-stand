@@ -6,6 +6,18 @@ The simulated dining room has exactly **120 seats across 33 table units**.
 
 The demo restaurant is **The Steak House**. All guests and service events are synthetic.
 
+![Host Stand with an external WebMCP agent assigning a party](./output/playwright/external-ai-assignment.png)
+
+## Judge walkthrough
+
+The complete narrated recording plan is in [demo-script.md](./demo-script.md). Verified browser captures show the core judging path:
+
+- [Fresh randomized 120-seat floor](./output/playwright/desktop.png)
+- [Unified reservation and walk-in priority queue](./output/playwright/reservation-walkin-priority.png)
+- [Manual host drag-and-drop override](./output/playwright/manual-host-override.png)
+- [External WebMCP agent assignment and reason](./output/playwright/external-ai-assignment.png)
+- [End-of-service scorecard and local baseline](./output/playwright/service-recap.png)
+
 ## Run locally
 
 Requires Node.js 20 or newer. There are no runtime packages to install.
@@ -129,7 +141,7 @@ Browser verification artifacts live in `output/playwright/`. The canonical rando
 - Local and external automation share the same reservation-first commit guard. Candidate plans remain visible for walk-ins, but automation cannot assign or hold a table for one while an unassigned waiting reservation has a legal table available. Human drag-and-drop or select-party-then-table is the explicit override: it locks the plan for an upcoming reservation and commits immediately for an arrived party.
 - A conservative 90-minute occupancy assumption produces deterministic expected finish times for every seated party.
 - Capacity and utilization are derived from the table inventory. The expanded room totals exactly 120 seats across 33 units, including a flexible six-table dining section with four 4-tops and two 2-tops.
-- The end-of-service Host Stand score is a transparent demo metric—not an OpenAI judging score: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence.
+- The end-of-service Host Stand score is a transparent demo metric—not an OpenAI judging score: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence. Wait control uses the seated walk-in P90 on a linear band: 15 minutes earns full credit and 90 minutes earns zero.
 - This is a demo, not a production reservation, POS, or guest-messaging system.
 
 ## License

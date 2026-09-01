@@ -261,7 +261,7 @@ Not a forecast. Live, labeled.
 - **Preference hit rate:** % of requested chips matched at seating.
 - **Wait P50 / P90** for walk-ins.
 
-At 10:00 PM, freeze an explicitly unofficial **Host Stand service score** from five labeled components: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence. Show assignment counts and covers by `HOST` / `ALG` / named external `AI`, the measured result of each service-brief directive, and a comparison with the local algorithm replaying the same random seed and Sat/Turn weights.
+At 10:00 PM, freeze an explicitly unofficial **Host Stand service score** from five labeled components: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence. Score walk-in wait control from the seated-party P90 on a linear 15-to-90-minute band: 15 minutes earns full credit and 90 minutes earns zero. Show assignment counts and covers by `HOST` / `ALG` / named external `AI`, the measured result of each service-brief directive, and a comparison with the local algorithm replaying the same random seed and Sat/Turn weights.
 
 These are the demo’s “how well this works” chart. When the host drags the slider toward Turn, wait P90 should drop and pref hit rate should drop. When they drag toward Sat, the opposite. If that does not happen, the optimizer is fake.
 

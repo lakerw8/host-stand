@@ -104,7 +104,7 @@ test("the seating brief changes table scoring with an explicit operational reaso
   const scored = scoreAssignment(state, party.id, table.id, { forCandidate: true, source: "agent" });
 
   assert.equal(scored.legal, true);
-  assert.equal(scored.serviceBriefAdjustment, -0.12);
+  assert.equal(scored.serviceBriefAdjustment, -0.26);
   assert.match(scored.serviceBriefReasons.join(" "), /overloaded/i);
 });
 

@@ -227,6 +227,7 @@ def main():
         assert waiting_name in legal_table.inner_text()
         assert legal_table.locator(".table-provenance").inner_text() == "HOST"
         assert "Manual host override" in legal_table.locator(".table-provenance").get_attribute("title")
+        page.screenshot(path=str(OUTPUT / "manual-host-override.png"), full_page=True)
         results.append("manual mode waits for a real arrival and seats it through drag-and-drop")
         results.append("manual overrides remain visibly attributed on the assigned table")
 
@@ -237,9 +238,9 @@ def main():
         assert "Manual host" in page.locator(".controller-mode-guide").inner_text()
         assert "Local algorithm" in page.locator(".controller-mode-guide").inner_text()
         assert "External AI" in page.locator(".controller-mode-guide").inner_text()
-        attached = page.evaluate("async () => window.hostStandInvokeTool('attach_agent', {agent_name: 'Browser QA', mode: 'autonomous'})")
+        attached = page.evaluate("async () => window.hostStandInvokeTool('attach_agent', {agent_name: 'WebMCP Agent', mode: 'autonomous'})")
         assert attached["ok"] is True
-        assert "Browser QA is attached" in page.locator(".agent-connect-panel").inner_text()
+        assert "WebMCP Agent is attached" in page.locator(".agent-connect-panel").inner_text()
 
         assignment = page.evaluate("""async () => {
           const queue = await window.hostStandInvokeTool('get_queue', {});
@@ -282,8 +283,14 @@ def main():
         assert finish_fit["insideTable"] is True, finish_fit
         assert "Expected finish" in small_table.get_attribute("aria-label")
         assert small_table.locator(".table-provenance").inner_text() == "AI"
-        assert "Browser QA" in small_table.locator(".table-provenance").get_attribute("title")
+        assert "WebMCP Agent" in small_table.locator(".table-provenance").get_attribute("title")
         assert "Right-sized table" in small_table.locator(".table-provenance").get_attribute("title")
+        dismiss_feedback = page.locator('[data-action="dismiss-feedback"]')
+        if dismiss_feedback.count():
+            dismiss_feedback.click()
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.wait_for_timeout(50)
+        page.screenshot(path=str(OUTPUT / "external-ai-assignment.png"), full_page=True)
         results.append("a seated 2-top keeps its full 90-minute expected finish visible without truncation")
         results.append("external AI assignments show the named agent and its reason on the floor")
 
@@ -331,6 +338,15 @@ def main():
         assert "Turn 65" in page.locator(".weight-console label").inner_text()
         results.append("command search filters, closes with one Escape, and executes by keyboard")
 
+        page.locator(".reset-control").click()
+        detached = page.evaluate("async () => window.hostStandInvokeTool('detach_agent', {})")
+        assert detached["ok"] is True
+        close_agent_panel = page.locator('[data-action="close-agent-panel"]')
+        if close_agent_panel.count():
+            close_agent_panel.click()
+        if page.locator('[data-action="toggle-agent"]').get_attribute("aria-checked") == "false":
+            page.locator('[data-action="toggle-agent"]').click()
+        assert "local algorithm" in page.locator(".product-bar").inner_text().lower()
         page.evaluate("async () => window.hostStandInvokeTool('set_clock', {time: '10:00 PM', running: false})")
         recap_dialog = page.locator("#service-recap")
         assert recap_dialog.evaluate("dialog => dialog.open") is True
@@ -342,6 +358,9 @@ def main():
         assert recap_contract["official"] is False
         assert 0 <= recap_contract["score"] <= 100
         assert len(recap_contract["briefResults"]) == 2
+        assert recap_contract["partiesServed"] >= 60
+        assert any(origin["kind"] == "local" for origin in recap_contract["provenance"])
+        page.screenshot(path=str(OUTPUT / "service-recap.png"), full_page=True)
         recap_dialog.get_by_role("button", name="Return to floor").click()
         page.wait_for_function("() => !document.querySelector('#service-recap').open")
         assert recap_dialog.evaluate("dialog => dialog.open") is False

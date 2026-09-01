@@ -189,7 +189,7 @@ function serviceBriefAdjustment(state, party, table) {
       && targetMinute >= directive.from
       && targetMinute < directive.until
       && table.zone === directive.zone) {
-      adjustment -= 0.12;
+      adjustment -= 0.26;
       reasons.push(`${directive.server}’s ${directive.sectionLabel} is overloaded`);
     }
     if (directive.type === "party_proximity" && directive.partyIds.includes(party.id)) {
@@ -202,7 +202,7 @@ function serviceBriefAdjustment(state, party, table) {
       const distance = tableGridDistance(table, otherTable);
       if (distance != null) {
         const nearby = distance <= directive.maxTableDistance;
-        adjustment += nearby ? 0.1 : -0.1;
+        adjustment += nearby ? 0.16 : -0.16;
         reasons.push(`${nearby ? "near" : "far from"} ${otherParty.name} at ${otherTable.id}`);
       }
     }
@@ -1303,7 +1303,7 @@ export function getServiceRecap(state) {
   const brief = scoreServiceBrief(state);
   const values = {
     guestSatisfaction: averageSat,
-    waitControl: walkInWaits.length ? clamp(1 - percentile(walkInWaits, 0.9) / 45) : 0,
+    waitControl: walkInWaits.length ? clamp((90 - percentile(walkInWaits, 0.9)) / 75) : 0,
     tableFit: averageTurn,
     completion: eligiblePartyCount ? uniquePartyIds.size / eligiblePartyCount : 0,
     briefAdherence: brief.value
@@ -1339,7 +1339,7 @@ export function getServiceRecap(state) {
     score,
     grade,
     scoreLabel: "Host Stand service score",
-    formula: "30% guest satisfaction · 20% walk-in wait control · 20% table fit · 15% parties served · 15% service brief",
+    formula: "30% guest satisfaction · 20% walk-in wait control (P90: 15m earns 100%, 90m earns 0%) · 20% table fit · 15% parties served · 15% service brief",
     components: Object.keys(weights).map((key) => ({
       key,
       label: labels[key],
