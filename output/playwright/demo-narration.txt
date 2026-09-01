@@ -1,0 +1,11 @@
+Host Stand is a live, one-hundred-twenty-seat restaurant simulation built for the OpenAI WebMCP Challenge.
+
+Every new run creates a different five-hour dinner service with reservations, walk-ins, table turnover, accessibility requirements, and whole-floor priorities. Reservations and walk-ins share one operational queue, while the service brief adds realistic context such as an overloaded server section or two parties asking to sit nearby.
+
+The built-in local mode is a deterministic algorithm, not an LLM. It reviews the full floor after every meaningful event and every ten restaurant minutes. It publishes up to three tentative tables, honors available reservations before walk-ins, and executes the top legal plan when the host does nothing.
+
+The host always remains in control. Dragging an upcoming reservation locks a tentative plan. Dragging an arrived party seats it immediately. Every manual decision is labeled H O S T and the rest of the floor replans around it.
+
+An external WebMCP agent can take over without a Host Stand API key. It discovers twenty browser-native tools, reads structured state instead of scraping the interface, scores assignments, publishes candidates, and assigns a table with a concise reason. Its decisions are labeled A I, so they remain distinguishable from both the host and the local algorithm.
+
+At ten P M, Host Stand scores guest satisfaction, walk-in wait control, table fit, parties served, and adherence to the service brief. It also compares the result with the local algorithm replaying the identical random seed and settings. The score is a transparent product metric, not an OpenAI judging score.

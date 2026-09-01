@@ -2,6 +2,7 @@
 node_modules/
 coverage/
 *.log
+output/playwright/*.aiff
 
 # Local configuration and credentials
 .env

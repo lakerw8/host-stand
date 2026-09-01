@@ -12,6 +12,7 @@ The demo restaurant is **The Steak House**. All guests and service events are sy
 
 The complete narrated recording plan is in [demo-script.md](./demo-script.md). Verified browser captures show the core judging path:
 
+- [Narrated 94-second local preview (MP4)](./output/playwright/host-stand-demo.mp4)
 - [Fresh randomized 120-seat floor](./output/playwright/desktop.png)
 - [Unified reservation and walk-in priority queue](./output/playwright/reservation-walkin-priority.png)
 - [Manual host drag-and-drop override](./output/playwright/manual-host-override.png)

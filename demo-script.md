@@ -2,6 +2,8 @@
 
 Target runtime: **2 minutes 45 seconds**. Record at 1440×900 with narration. Do not imply the Host Stand service score is an OpenAI judging score.
 
+A [94-second narrated preview](./output/playwright/host-stand-demo.mp4) is generated from the five browser-verified proof states. It is an honest local preview, not the final hosted video: before submission, record the continuous external-agent tool-call sequence and publish the final cut at the video URL required by Devpost.
+
 ## 0:00–0:20 · Establish the problem
 
 **Show:** A fresh paused run at 5:00 PM.
