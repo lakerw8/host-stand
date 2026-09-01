@@ -367,10 +367,10 @@ export function createRandomNightScenario(seed = `night-${Date.now()}`) {
       continue;
     }
     if (noShowIds.has(party.id)) {
-      events.push({ minute: Math.min(SERVICE_END - 1, party.reservedFor + randomInt(random, 15, 25)), type: "no_show", partyIds: [party.id] });
+      events.push({ minute: Math.min(SERVICE_END - 1, party.reservedFor + 20), type: "no_show", partyIds: [party.id] });
       continue;
     }
-    const arrivalMinute = Math.max(FIRST_SEATING, Math.min(SERVICE_END - 1, party.reservedFor + randomInt(random, -4, 10)));
+    const arrivalMinute = Math.min(SERVICE_END - 1, party.reservedFor + randomFrom(random, [0, 0, 0, 10, 20]));
     events.push({ minute: arrivalMinute, type: "arrival", partyIds: [party.id] });
   }
 
