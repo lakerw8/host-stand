@@ -19,7 +19,7 @@ The complete narrated recording plan is in [demo-script.md](./demo-script.md). V
 - [Unified reservation and walk-in priority queue](./output/playwright/reservation-walkin-priority.png)
 - [Manual host drag-and-drop override](./output/playwright/manual-host-override.png)
 - [External WebMCP agent assignment and reason](./output/playwright/external-ai-assignment.png)
-- [End-of-service scorecard and local baseline](./output/playwright/service-recap.png)
+- [End-of-service scorecard and Basic algo baseline](./output/playwright/service-recap.png)
 
 ## Run locally
 
@@ -42,26 +42,26 @@ For a container or hosted runtime, expose the server with `HOST_STAND_HOST=0.0.0
 - The five-hour service clock is paused at 5:00 PM until you press **Start** and runs through 10:00 PM. Pause or resume it, then select 1×, 2×, or 5×. At 1×, one real second is one restaurant minute.
 - Press **New run** at any point to clear the floor and generate a different paused simulation.
 - Use the skip control to jump to the next arrival, auto-assignment, table turn, or service event.
-- Leave **Local algorithm** on to see a rolling 45-minute plan, event-driven reassessments, a full review every 10 restaurant minutes, and automatic execution of an unchanged tentative table at arrival.
+- Leave **Basic algo** on to see a rolling 45-minute plan, event-driven reassessments, a full review every 10 restaurant minutes, and automatic execution of an unchanged tentative table at arrival.
 - Reservations and arrived walk-ins share one upcoming-party panel with high-contrast `RES` / `WALK-IN` badges and a visible “Reservation first” key. Waiting reservations sort ahead of waiting walk-ins; upcoming reservations remain chronological. New arrivals preserve the host's current scroll position.
 - Every run generates 84–96 parties with a new roster, reservation/walk-in mix, arrival timing, zero-to-three preferences, special needs, no-shows, and possible kitchen delays. Demand is weighted into a realistic 6–9 PM dinner rush and regression-tested to reach at least 80% table-seat utilization. Party sizes are normalized per run: 72% are 2- or 4-tops, 12% are 5+, and the expected mean is about three guests. A run code is shown in the footer for debugging.
 - Capacity is a maximum, not an exact-size rule: a party of three may legally use a four-seat table. The agent still scores right-sized assignments more highly so it does not waste larger tables without a reason.
 - With an agent on, drag an upcoming reservation to a legal table—or select the party and then the table—to replace the tentative agent plan with a locked `HOST` override. Use either gesture on an arrived party to seat it immediately.
-- Turn the local algorithm off for **Manual host**. Future reservations stay inactive until arrival; then drag the party onto a table, or select the party and then a table.
+- Turn **Basic algo** off for **Manual host**. Future reservations stay inactive until arrival; then drag the party onto a table, or select the party and then a table.
 - Every generated run includes at least one high-chair and one accessibility constraint for the allocator to solve.
 - Every seated party receives a visible expected finish exactly 90 restaurant minutes after seating.
 - Select a table to lock/unlock it or mark it dirty/ready. After a party leaves, its table stays dirty for exactly three restaurant minutes, then returns to ready automatically.
 - Move the Sat ↔ Turn slider. Candidate ranking and live metrics re-solve immediately.
 - Press <kbd>⌘K</kbd> or <kbd>Ctrl+K</kbd> for service commands and scoring presets.
 - Read the compact **Service brief** above the floor. Each random run contains only whole-floor seating context: one temporarily overloaded server section and one pair of reservation parties asking for nearby tables. These are soft preferences; table capacity, accessibility, high-chair requirements, locks, and reservation priority remain hard rules.
-- Every planned or seated table identifies its decision owner as `HOST`, `ALG`, or `AI`; select the table or hover the label to inspect the reason. At 10:00 PM the demo opens an auditable scorecard and compares the run with the local algorithm replaying the same seed and weights.
+- Every planned or seated table identifies its decision owner as `HOST`, `ALG`, or `AI`; select the table or hover the label to inspect the reason. At 10:00 PM the demo opens an auditable scorecard and compares the run with Basic algo replaying the same seed and weights.
 
 ### Three operating modes
 
 | Mode | Who decides | What the host sees |
 | --- | --- | --- |
 | **Manual host** | The human | No tentative plans; every arrived party waits for drag-and-drop or party-then-table selection. |
-| **Local algorithm** | Deterministic JavaScript scoring | Up to three tentative tables, reasons, automatic deadlines, and `ALG` provenance. No LLM or API key. |
+| **Basic algo** | Deterministic JavaScript scoring | Up to three tentative tables, reasons, automatic deadlines, and `ALG` provenance. No LLM or API key. |
 | **External AI** | A WebMCP-capable browser agent | The named agent owns reviews and tool calls; its plans, reasons, and assignments carry `AI` provenance. |
 
 ## WebMCP
@@ -142,7 +142,7 @@ Browser verification artifacts live in `output/playwright/`. The canonical rando
 ## Implementation notes
 
 - Pure HTML, CSS, and JavaScript modules; no framework or application dependencies.
-- Built-in Local algorithm behavior is deterministic JavaScript scoring. It does not call an LLM. An external AI agent can explicitly take ownership with `attach_agent`, inspect and operate the same state through WebMCP, and remain attached across random New runs.
+- Built-in Basic algo behavior is deterministic JavaScript scoring. It does not call an LLM. An external AI agent can explicitly take ownership with `attach_agent`, inspect and operate the same state through WebMCP, and remain attached across random New runs.
 - Local and external automation share the same reservation-first commit guard. Candidate plans remain visible for walk-ins, but automation cannot assign or hold a table for one while an unassigned waiting reservation has a legal table available. Human drag-and-drop or select-party-then-table is the explicit override: it locks the plan for an upcoming reservation and commits immediately for an arrived party.
 - A conservative 90-minute occupancy assumption produces deterministic expected finish times for every seated party.
 - Capacity and utilization are derived from the table inventory. The expanded room totals exactly 120 seats across 33 units, including a flexible six-table dining section with four 4-tops and two 2-tops.

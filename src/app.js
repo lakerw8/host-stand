@@ -118,8 +118,8 @@ function renderServiceRecap() {
   const baseline = getLocalBaselineRecap();
   const delta = recap.score - baseline.score;
   const comparison = delta === 0
-    ? "Matches the same-night local baseline"
-    : `${Math.abs(delta)} point${Math.abs(delta) === 1 ? "" : "s"} ${delta > 0 ? "above" : "below"} the same-night local baseline`;
+    ? "Matches the same-night Basic algo baseline"
+    : `${Math.abs(delta)} point${Math.abs(delta) === 1 ? "" : "s"} ${delta > 0 ? "above" : "below"} the same-night Basic algo baseline`;
   return `
     <dialog class="recap-dialog" id="service-recap" aria-labelledby="recap-title">
       <div class="recap-dialog__head">
@@ -732,7 +732,7 @@ function renderAgentConnector() {
         <p>${connection ? `${escapeHtml(connection.mode)} mode · connection stays attached across new random runs.` : `${capability} No API key is needed: the WebMCP-capable browser agent supplies the model. Open this deployed page there, paste the prompt, and watch its named decisions appear on the floor.`}</p>
         <div class="controller-mode-guide" aria-label="Available controller modes">
           <span class="${state.controllerMode === "manual" ? "is-current" : ""}"><b>Manual host</b><small>Drag on arrival</small></span>
-          <span class="${state.controllerMode === "local" ? "is-current" : ""}"><b>Local algorithm</b><small>Deterministic baseline</small></span>
+          <span class="${state.controllerMode === "local" ? "is-current" : ""}"><b>Basic algo</b><small>Deterministic baseline</small></span>
           <span class="${state.controllerMode === "external" ? "is-current" : ""}"><b>External AI</b><small>WebMCP decisions</small></span>
         </div>
       </div>
@@ -790,10 +790,10 @@ function render() {
   const clockProgress = ((state.now - SERVICE_START) / (SERVICE_END - SERVICE_START)) * 100;
   const activityChips = state.activity.slice(0, 3).map((entry) => `<span><code>${escapeHtml(entry.tool)}</code> ${escapeHtml(entry.detail)}</span>`).join("");
   const clockAction = state.running ? "Pause" : state.now === SERVICE_START ? "Start" : "Resume";
-  const controllerLabel = state.controllerMode === "external"
-    ? state.agentConnection?.name || "External agent"
-    : state.agentEnabled ? "Local algorithm" : "Manual host";
-  const planLabel = state.controllerMode === "external" ? "External AI" : state.agentEnabled ? "Local algorithm" : "Manual host";
+  const controllerLabel = "Basic algo";
+  const planLabel = state.controllerMode === "external"
+    ? state.agentConnection?.name || "External AI"
+    : state.agentEnabled ? "Basic algo" : "Manual host";
   const planText = state.controllerMode === "manual"
     ? "Allocation automation is off. Assign arrived parties by drag or select-then-table; all hard constraints still apply."
     : state.plan;
@@ -836,7 +836,7 @@ function render() {
           </div>
 
           <div class="topbar-actions">
-            <button class="agent-toggle ${state.agentEnabled ? "is-on" : ""} ${state.controllerMode === "external" ? "has-external" : ""}" type="button" role="switch" aria-checked="${state.agentEnabled}" data-action="toggle-agent" data-focus-key="agent-toggle" title="Toggle the built-in deterministic optimizer">
+            <button class="agent-toggle ${state.agentEnabled ? "is-on" : ""} ${state.controllerMode === "external" ? "has-external" : ""}" type="button" role="switch" aria-checked="${state.agentEnabled}" aria-label="Basic algo" data-action="toggle-agent" data-focus-key="agent-toggle" title="Turn the built-in Basic algo on or off">
               <span class="agent-toggle__track"><span></span></span>
               <span>${escapeHtml(controllerLabel)}</span>
             </button>

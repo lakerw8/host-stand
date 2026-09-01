@@ -574,7 +574,7 @@ function assignmentOriginFor(state, source, preservedOrigin = null) {
   if (source === "agent" && state.controllerMode === "external") {
     return { kind: "external", label: state.agentConnection?.name || "External AI" };
   }
-  if (source === "agent") return { kind: "local", label: "Local algorithm" };
+  if (source === "agent") return { kind: "local", label: "Basic algo" };
   return { kind: "system", label: "Service clock" };
 }
 
@@ -1143,12 +1143,12 @@ export function setAgentEnabled(state, enabled) {
   state.agentEnabled = Boolean(enabled);
   state.controllerMode = state.agentEnabled ? "local" : "manual";
   state.agentConnection = null;
-  logActivity(state, "agent_mode", state.agentEnabled ? "Autopilot enabled" : "Manual floor · drag or tap to assign", "host");
+  logActivity(state, "agent_mode", state.agentEnabled ? "Basic algo enabled" : "Manual floor · drag or tap to assign", "host");
   if (state.agentEnabled) {
     state.agentReview.status = "reviewing";
-    state.agentReview.reason = "autopilot enabled";
+    state.agentReview.reason = "Basic algo enabled";
     state.agentReview.nextReviewAt = state.now + AGENT_HEARTBEAT_MINUTES;
-    runAgentCycle(state, { reason: "autopilot enabled", allowAutoCommit: false });
+    runAgentCycle(state, { reason: "Basic algo enabled", allowAutoCommit: false });
   } else {
     for (const party of state.parties) {
       clearCandidatePlan(party);
@@ -1335,7 +1335,7 @@ export function getServiceRecap(state) {
   const grade = score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";
   const provenance = new Map();
   for (const record of records) {
-    const origin = record.assignmentOrigin || { kind: record.source === "host" ? "host" : "local", label: record.source === "host" ? "Host override" : "Local algorithm" };
+    const origin = record.assignmentOrigin || { kind: record.source === "host" ? "host" : "local", label: record.source === "host" ? "Host override" : "Basic algo" };
     const current = provenance.get(origin.kind) || { kind: origin.kind, label: origin.label, assignments: 0, covers: 0 };
     current.assignments += 1;
     current.covers += record.size;

@@ -14,11 +14,11 @@ A [94-second narrated preview](./output/playwright/host-stand-demo.mp4) is gener
 
 Point out the random run code, unified queue, table floor, and service brief.
 
-## 0:20–0:50 · Show the local algorithm planning
+## 0:20–0:50 · Show Basic algo planning
 
 **Show:** Press **Start**, select **5×**, then jump to the next event once or twice.
 
-**Say:** “The built-in local mode is a deterministic algorithm—not an LLM. It reviews the full floor after every meaningful event and every ten restaurant minutes. It publishes up to three tentative tables and automatically executes the top legal plan when the host does nothing.”
+**Say:** “Basic algo is deterministic—not an LLM. It reviews the full floor after every meaningful event and every ten restaurant minutes. It publishes up to three tentative tables and automatically executes the top legal plan when the host does nothing.”
 
 Point out an `ALG` table label and its explanation.
 
@@ -30,7 +30,7 @@ Point out an `ALG` table label and its explanation.
 
 ## 1:15–1:35 · Demonstrate fully manual operation
 
-**Show:** Turn off Local algorithm, jump to an arrived party, and drag it onto a legal table.
+**Show:** Turn off Basic algo, jump to an arrived party, and drag it onto a legal table.
 
 **Say:** “With automation off, no party assigns itself. The human must handle every arrival through drag-and-drop or party-then-table selection.”
 
@@ -38,15 +38,15 @@ Point out an `ALG` table label and its explanation.
 
 **Show:** Open **Connect AI**. In a WebMCP-capable browser agent, attach as `WebMCP Agent`, then call `get_floor`, `get_queue`, `score_assignment`, `set_candidates`, and `assign_table` with a concise reason.
 
-**Say:** “An external AI needs no Host Stand API key. It discovers twenty browser-native tools, reads structured state instead of scraping the page, and writes through the same engine as the human interface. The local algorithm pauses so the planners never conflict.”
+**Say:** “An external AI needs no Host Stand API key. It discovers twenty browser-native tools, reads structured state instead of scraping the page, and writes through the same engine as the human interface. Basic algo pauses so the planners never conflict.”
 
 Show the tool activity, assignment movement, `AI` provenance, and reason in the table inspector.
 
 ## 2:15–2:45 · Prove and score the result
 
-**Show:** Advance a full local-algorithm run to 10:00 PM and open **Review score**.
+**Show:** Advance a full Basic algo run to 10:00 PM and open **Review score**.
 
-**Say:** “At service end, Host Stand separates host, local-algorithm, and external-AI decisions. It scores guest satisfaction, walk-in wait control, table fit, parties served, and the service brief, then compares the result with the local algorithm replaying the identical random seed and weights. This is a transparent demo metric, not an OpenAI judging score.”
+**Say:** “At service end, Host Stand separates host, Basic-algo, and external-AI decisions. It scores guest satisfaction, walk-in wait control, table fit, parties served, and the service brief, then compares the result with Basic algo replaying the identical random seed and weights. This is a transparent demo metric, not an OpenAI judging score.”
 
 End on the scorecard with the public demo URL and GitHub repository visible in the video description.
 

@@ -41,7 +41,7 @@ def main():
         floor_contract = page.evaluate("async () => window.hostStandInvokeTool('get_floor', {})")
         assert [directive["type"] for directive in floor_contract["serviceBrief"]["directives"]] == ["section_load", "party_proximity"]
         assert page.locator(".service-brief span").count() == 2
-        assert "local algorithm" in page.locator(".product-bar").inner_text().lower()
+        assert "basic algo" in page.locator(".product-bar").inner_text().lower()
         source_key_text = " ".join(page.locator(".queue-source-key").inner_text().split())
         assert "Reservation first" in source_key_text, source_key_text
         assert "Walk-in after" in source_key_text, source_key_text
@@ -237,10 +237,13 @@ def main():
         assert "Attach through WebMCP" in page.locator(".agent-connect-panel").inner_text()
         assert "No API key is needed" in page.locator(".agent-connect-panel").inner_text()
         assert "Manual host" in page.locator(".controller-mode-guide").inner_text()
-        assert "Local algorithm" in page.locator(".controller-mode-guide").inner_text()
+        assert "Basic algo" in page.locator(".controller-mode-guide").inner_text()
         assert "External AI" in page.locator(".controller-mode-guide").inner_text()
         attached = page.evaluate("async () => window.hostStandInvokeTool('attach_agent', {agent_name: 'WebMCP Agent', mode: 'autonomous'})")
         assert attached["ok"] is True
+        assert page.locator('[data-action="toggle-agent"]').inner_text().strip() == "Basic algo"
+        assert page.locator('[data-action="toggle-agent"]').get_attribute("aria-checked") == "false"
+        assert "WebMCP Agent" in page.locator(".product-bar").inner_text()
         assert "WebMCP Agent is attached" in page.locator(".agent-connect-panel").inner_text()
 
         assignment = page.evaluate("""async () => {
@@ -347,12 +350,12 @@ def main():
             close_agent_panel.click()
         if page.locator('[data-action="toggle-agent"]').get_attribute("aria-checked") == "false":
             page.locator('[data-action="toggle-agent"]').click()
-        assert "local algorithm" in page.locator(".product-bar").inner_text().lower()
+        assert "basic algo" in page.locator(".product-bar").inner_text().lower()
         page.evaluate("async () => window.hostStandInvokeTool('set_clock', {time: '10:00 PM', running: false})")
         recap_dialog = page.locator("#service-recap")
         assert recap_dialog.evaluate("dialog => dialog.open") is True
         assert "How the floor performed" in recap_dialog.inner_text()
-        assert "same-night local baseline" in recap_dialog.inner_text()
+        assert "same-night Basic algo baseline" in recap_dialog.inner_text()
         assert recap_dialog.locator(".recap-components > div").count() == 5
         assert recap_dialog.locator(".recap-details section").count() == 2
         recap_contract = page.evaluate("async () => (await window.hostStandInvokeTool('get_floor', {})).serviceRecap")
@@ -365,7 +368,7 @@ def main():
         recap_dialog.get_by_role("button", name="Return to floor").click()
         page.wait_for_function("() => !document.querySelector('#service-recap').open")
         assert recap_dialog.evaluate("dialog => dialog.open") is False
-        results.append("10 PM opens a transparent scorecard with local-baseline comparison, provenance, and brief adherence")
+        results.append("10 PM opens a transparent scorecard with Basic algo comparison, provenance, and brief adherence")
 
         for width in (320, 375, 414, 768):
             page.set_viewport_size({"width": width, "height": 900})

@@ -261,7 +261,7 @@ Not a forecast. Live, labeled.
 - **Preference hit rate:** % of requested chips matched at seating.
 - **Wait P50 / P90** for walk-ins.
 
-At 10:00 PM, freeze an explicitly unofficial **Host Stand service score** from five labeled components: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence. Score walk-in wait control from the seated-party P90 on a linear 15-to-90-minute band: 15 minutes earns full credit and 90 minutes earns zero. Show assignment counts and covers by `HOST` / `ALG` / named external `AI`, the measured result of each service-brief directive, and a comparison with the local algorithm replaying the same random seed and Sat/Turn weights.
+At 10:00 PM, freeze an explicitly unofficial **Host Stand service score** from five labeled components: 30% guest satisfaction, 20% walk-in wait control, 20% table fit and turns, 15% eligible parties served, and 15% service-brief adherence. Score walk-in wait control from the seated-party P90 on a linear 15-to-90-minute band: 15 minutes earns full credit and 90 minutes earns zero. Show assignment counts and covers by `HOST` / `ALG` / named external `AI`, the measured result of each service-brief directive, and a comparison with Basic algo replaying the same random seed and Sat/Turn weights.
 
 These are the demo’s “how well this works” chart. When the host drags the slider toward Turn, wait P90 should drop and pref hit rate should drop. When they drag toward Sat, the opposite. If that does not happen, the optimizer is fake.
 
@@ -273,9 +273,9 @@ These are the demo’s “how well this works” chart. When the host drags the 
 2. **0:20–0:45** Press Start and 5x. Use next-event once or twice so the first parties arrive and the agent begins committing planned tables.
 3. **0:45–1:15** Click a non-primary candidate on an upcoming party. The chip becomes **HOST**; when that party arrives, the host plan commits and the movement animation lands on the chosen table.
 4. **1:15–1:45** Toggle to **Manual floor**, jump to a walk-in, and drag the waiting row onto a legal table. No automatic candidates or assignments appear while manual mode is active.
-5. **1:45–2:10** Return to Local algorithm. Lock a table or mark one dirty/ready and show the event-driven full-floor review in the activity ledger.
+5. **1:45–2:10** Return to Basic algo. Lock a table or mark one dirty/ready and show the event-driven full-floor review in the activity ledger.
 6. **2:10–2:35** Open **Connect AI** and attach a WebMCP-capable agent. Show `get_floor`, `get_queue`, `score_assignment`, and a write such as `set_candidates` or `assign_table` updating the same board.
-7. **2:35–3:00** Jump to 10:00 PM and show the service score, same-seed local baseline, assignment provenance, and service-brief results. State that this is the demo’s metric, not the OpenAI judging score.
+7. **2:35–3:00** Jump to 10:00 PM and show the service score, same-seed Basic algo baseline, assignment provenance, and service-brief results. State that this is the demo’s metric, not the OpenAI judging score.
 
 Audio on the video names the tools.
 
