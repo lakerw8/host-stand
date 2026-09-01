@@ -301,7 +301,8 @@ export function scoreAssignment(state, partyId, tableId, options = {}) {
 
   const targetMinute = party.status === "upcoming" ? party.reservedFor : state.now;
   const availabilityDelay = Math.max(0, projectedFreeMinute(table, state.now) - targetMinute);
-  const availabilityPenalty = Math.min(0.35, availabilityDelay / 120);
+  const availabilityPenalty = Math.min(0.35, availabilityDelay / 120)
+    * (0.25 + state.weights.turn * 1.5);
   const regularBoost = party.isRegular ? 0.025 : 0;
   const brief = serviceBriefAdjustment(state, party, table);
   const score = clamp(state.weights.sat * sat + state.weights.turn * turn + regularBoost - availabilityPenalty + brief.adjustment);
