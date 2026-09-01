@@ -69,10 +69,12 @@ test("an external agent can plan, mutate, verify, and recover through tools only
   assert.equal(initialFloor.agentCadence.planningHorizonMinutes, 45);
   assert.equal(initialFloor.agentCadence.freezeWindowMinutes, 5);
   assert.equal(initialFloor.serviceBrief.directives.length, 2);
+  assert.deepEqual(initialFloor.serviceBrief.directives.map((directive) => directive.type), ["section_load", "party_proximity"]);
   assert.ok(initialFloor.nextRecommendedActions.length >= 1);
 
   assert.equal((await execute("set_clock", { time: "6:00 PM", running: false })).ok, true);
   const queue = await execute("get_queue");
+  assert.deepEqual(queue.serviceBrief, initialFloor.serviceBrief);
   const patel = queue.reservations.find((party) => party.id === "patel");
   assert.equal(patel.status, "waiting");
 

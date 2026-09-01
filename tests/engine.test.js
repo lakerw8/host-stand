@@ -81,6 +81,7 @@ test("random service runs replay by seed and vary parties, timing, constraints, 
   assert.deepEqual(first.serviceBrief, replay.serviceBrief);
   assert.notDeepEqual(first.parties, next.parties);
   assert.notDeepEqual(first.events, next.events);
+  assert.notDeepEqual(first.serviceBrief, next.serviceBrief);
   assert.equal(first.serviceBrief.directives.length, 2);
   assert.deepEqual(first.serviceBrief.directives.map((directive) => directive.type), ["section_load", "party_proximity"]);
   assert.ok(first.serviceBrief.directives.every((directive) => directive.text.length >= 30));
@@ -106,6 +107,31 @@ test("the seating brief changes table scoring with an explicit operational reaso
   assert.equal(scored.legal, true);
   assert.equal(scored.serviceBriefAdjustment, -0.26);
   assert.match(scored.serviceBriefReasons.join(" "), /overloaded/i);
+});
+
+test("the seating brief rewards keeping linked parties nearby", () => {
+  const state = createInitialState({ agentEnabled: false, preferenceSeed: "brief-proximity-scoring" });
+  const directive = state.serviceBrief.directives.find((entry) => entry.type === "party_proximity");
+  const [targetPartyId, companionPartyId] = directive.partyIds;
+  const targetParty = getParty(state, targetPartyId);
+  const companionParty = getParty(state, companionPartyId);
+
+  targetParty.size = 2;
+  targetParty.children = 0;
+  targetParty.needsAccessible = false;
+  targetParty.preferences = [];
+  targetParty.status = "waiting";
+  companionParty.candidateTableIds = ["V1"];
+
+  const nearby = scoreAssignment(state, targetParty.id, "V2", { forCandidate: true, source: "agent" });
+  const distant = scoreAssignment(state, targetParty.id, "S4", { forCandidate: true, source: "agent" });
+
+  assert.equal(nearby.legal, true);
+  assert.equal(distant.legal, true);
+  assert.equal(nearby.serviceBriefAdjustment, 0.16);
+  assert.equal(distant.serviceBriefAdjustment, -0.16);
+  assert.match(nearby.serviceBriefReasons.join(" "), /near/i);
+  assert.match(distant.serviceBriefReasons.join(" "), /far/i);
 });
 
 test("random nights normalize party sizes around mostly two-tops and four-tops", () => {
