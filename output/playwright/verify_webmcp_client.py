@@ -1,12 +1,12 @@
+import os
 from pathlib import Path
-from urllib.request import urlopen
 
 from playwright.sync_api import sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-URL = "http://127.0.0.1:4180"
+URL = os.environ.get("HOST_STAND_URL", "http://127.0.0.1:4180")
 
 MODEL_CONTEXT_POLYFILL = r"""
 (() => {
@@ -62,9 +62,6 @@ MODEL_CONTEXT_POLYFILL = r"""
 
 
 def main():
-    with urlopen(URL) as response:
-        assert response.headers.get("Origin-Agent-Cluster") == "?1"
-
     console_errors = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROME, headless=True)
@@ -72,7 +69,9 @@ def main():
         page.add_init_script(MODEL_CONTEXT_POLYFILL)
         page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
         page.on("pageerror", lambda error: console_errors.append(str(error)))
-        page.goto(URL, wait_until="domcontentloaded")
+        response = page.goto(URL, wait_until="domcontentloaded")
+        assert response is not None
+        assert response.headers.get("origin-agent-cluster") == "?1"
         page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 20")
 
         result = page.evaluate(r"""async () => {

@@ -1,6 +1,7 @@
 # Dependencies and generated reports
 node_modules/
 coverage/
+dist/
 *.log
 output/playwright/*.aiff
 

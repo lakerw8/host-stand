@@ -6,6 +6,8 @@ The simulated dining room has exactly **120 seats across 33 table units**.
 
 The demo restaurant is **The Steak House**. All guests and service events are synthetic.
 
+[Open the live demo](https://host-stand-nine.vercel.app) · [View the source](https://github.com/lakerw8/host-stand)
+
 ![Host Stand with an external WebMCP agent assigning a party](./output/playwright/external-ai-assignment.png)
 
 ## Judge walkthrough
@@ -130,6 +132,8 @@ npm test
 npm run verify:browser # while npm start is running on port 4180
 npm run verify:webmcp # while npm start is running on port 4180
 ```
+
+Set `HOST_STAND_URL` to test the same browser and WebMCP flows against a deployed URL.
 
 The Node test suite covers the paused initial clock, compression, 10-minute heartbeat, event-driven reviews, the 45-minute horizon, reservation-first commitment order, host priority overrides, reservation and walk-in commitment windows, manual mode, WebMCP upcoming-party plans, hard constraints, locks, weights, service-brief scoring, decision provenance, the end-of-service recap, 90-minute expected finishes, and the seated → dirty → ready lifecycle.
 

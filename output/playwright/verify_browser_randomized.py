@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -6,7 +7,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "output" / "playwright"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-URL = "http://127.0.0.1:4180"
+URL = os.environ.get("HOST_STAND_URL", "http://127.0.0.1:4180")
 
 
 def clock_minute(label):
