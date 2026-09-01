@@ -332,6 +332,7 @@ export function createRandomNightScenario(seed = `night-${Date.now()}`) {
       children,
       needsAccessible,
       isRegular: random() < 0.16,
+      checkInSizeDelta: 0,
       quotedWaitMin: null,
       notes: children ? `${children} ${children === 1 ? "child" : "children"} · high chair required` : occasion
     };
@@ -351,6 +352,13 @@ export function createRandomNightScenario(seed = `night-${Date.now()}`) {
   const reservations = parties.filter((party) => party.source === "reservation");
   const noShowCount = randomInt(random, 0, Math.min(2, reservations.length));
   const noShowIds = new Set(shuffle(reservations.map((party) => party.id), random).slice(0, noShowCount));
+  const sizeIncreaseCount = Math.max(1, Math.round((parties.length - noShowIds.size) * 0.1));
+  shuffle(
+    parties.filter((party) => !noShowIds.has(party.id) && party.size < 8),
+    random
+  ).slice(0, sizeIncreaseCount).forEach((party) => {
+    party.checkInSizeDelta = 1;
+  });
   const events = [];
 
   for (const party of parties) {

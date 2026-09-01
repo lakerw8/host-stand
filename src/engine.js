@@ -1039,10 +1039,18 @@ function processEvent(state, event) {
       if (!party || party.status !== "upcoming") continue;
       party.status = "waiting";
       if (party.source === "walk_in") party.arrivedAt = event.minute;
+      const previousSize = party.size;
+      if (party.checkInSizeDelta) {
+        party.size += party.checkInSizeDelta;
+        party.checkInSizeDelta = 0;
+      }
       if (state.controllerMode === "external" && party.candidateTableIds.length && state.agentConnection?.mode === "autonomous") {
         party.autoAssignAt = state.now;
       }
-      logActivity(state, "get_queue", `${party.name} arrived · party of ${party.size}`, "clock");
+      const arrivalDetail = party.size > previousSize
+        ? `${party.name} arrived · party grew ${previousSize} → ${party.size}`
+        : `${party.name} arrived · party of ${party.size}`;
+      logActivity(state, "get_queue", arrivalDetail, "clock");
       changed = true;
     }
   }
