@@ -286,18 +286,17 @@ export function createServiceBrief(parties, seed = "host-stand-brief", options =
 export function createRandomNightScenario(seed = `night-${Date.now()}`) {
   const random = seededRandom(seed);
   const partyCount = randomInt(random, 84, 96);
-  const reservationCount = randomInt(
-    random,
-    Math.floor(partyCount * 0.6),
-    Math.floor(partyCount * 0.68)
+  const reservationSlotPool = weightedServiceSlots(FIRST_SEATING, 21 * 60 + 30, 15, dinnerRushWeight);
+  const reservationCount = Math.min(
+    randomInt(random, Math.floor(partyCount * 0.6), Math.floor(partyCount * 0.68)),
+    reservationSlotPool.length
   );
   const names = shuffle(PARTY_NAME_POOL, random).slice(0, partyCount);
   const partySizes = normalizedPartySizeRoster(partyCount, random);
   const preferenceCounts = shuffle(Array.from({ length: partyCount }, (_, index) => index % 4), random);
-  const reservationSlots = shuffle(
-    weightedServiceSlots(FIRST_SEATING, 21 * 60 + 30, 15, dinnerRushWeight),
-    random
-  ).slice(0, reservationCount).sort((left, right) => left - right);
+  const reservationSlots = shuffle(reservationSlotPool, random)
+    .slice(0, reservationCount)
+    .sort((left, right) => left - right);
   const walkInCount = partyCount - reservationCount;
   const walkInSlots = shuffle(
     weightedServiceSlots(FIRST_SEATING + 5, 21 * 60 + 40, 5, (minute) => (
