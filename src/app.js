@@ -597,7 +597,7 @@ function partyTiming(party) {
   const origin = party.source === "walk_in" ? party.arrivedAt : party.reservedFor;
   const waited = Math.max(0, state.now - origin);
   if (state.controllerMode === "manual") return `${waited}m wait · manual`;
-  if (getReservationPriorityBlocker(state, party)) return `${waited}m wait · after reservation`;
+  if (getReservationPriorityBlocker(state, party)) return `${waited}m wait`;
   if (party.autoAssignAt == null) return `${waited}m wait`;
   return `${waited}m wait · agent ${Math.max(0, party.autoAssignAt - state.now)}m`;
 }
