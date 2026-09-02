@@ -3,6 +3,8 @@ import {
   AGENT_FREEZE_WINDOW_MINUTES,
   AGENT_HEARTBEAT_MINUTES,
   AGENT_PLANNING_HORIZON_MINUTES,
+  HOST_NOTE_MAX_LENGTH,
+  addHostNote,
   advanceMinutes,
   advanceTo,
   assignTable,
@@ -37,7 +39,7 @@ let interactionHold = false;
 let paletteOpen = false;
 let agentPanelOpen = false;
 let simulationPanelOpen = false;
-let webmcpStatus = { supported: null, entryPoint: null, registered: 0, total: 20, failures: [] };
+let webmcpStatus = { supported: null, entryPoint: null, registered: 0, total: 21, failures: [] };
 let feedback = null;
 let carryMinutes = 0;
 let lastRealTick = performance.now();
@@ -58,6 +60,7 @@ const icons = {
   check: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>',
   warning: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18v.01"/></svg>',
   clock: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  allergy: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.01"/></svg>',
   chevron: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>'
 };
 
@@ -378,6 +381,10 @@ function renderTable(table, activeParty) {
   const originBadge = table.status === "seated" && table.assignmentOrigin
     ? `<span class="table-provenance is-${escapeHtml(table.assignmentOrigin.kind)}" title="${escapeHtml(`${table.assignmentOrigin.label}: ${table.assignmentReason || "Assignment recorded"}`)}">${table.assignmentOrigin.kind === "host" ? "HOST" : "AI"}</span>`
     : "";
+  const seatedParty = table.status === "seated" && table.partyId ? getParty(state, table.partyId) : null;
+  const allergyMark = seatedParty?.marks.allergy
+    ? `<span class="table-mark table-mark--allergy" title="Allergy at this table">${icon("allergy")}</span>`
+    : "";
   const classes = [
     "table-node",
     `table-node--${table.shape}`,
@@ -393,7 +400,8 @@ function renderTable(table, activeParty) {
   const provenanceAria = table.assignmentOrigin
     ? ` Assigned by ${table.assignmentOrigin.label}. ${table.assignmentReason || ""}`
     : "";
-  const aria = `${table.id}, ${table.seats} seats, ${table.zone}, ${statusLabel(table)}. ${tableSecondary(table)}.${timingAria}${provenanceAria}${rank ? ` Candidate ${rank} for ${activeParty.name}.` : ""}`;
+  const marksAria = seatedParty?.marks.allergy ? " Allergy at this table." : "";
+  const aria = `${table.id}, ${table.seats} seats, ${table.zone}, ${statusLabel(table)}. ${tableSecondary(table)}.${timingAria}${provenanceAria}${marksAria}${rank ? ` Candidate ${rank} for ${activeParty.name}.` : ""}`;
 
   return `
     <button
@@ -408,6 +416,7 @@ function renderTable(table, activeParty) {
     >
       ${rank ? `<span class="candidate-rank" aria-hidden="true">${rank}</span>` : ""}
       ${table.locked ? `<span class="table-lock" aria-hidden="true">${icon("lock")}</span>` : ""}
+      ${allergyMark}
       ${originBadge}
       <span class="table-id">${table.id}</span>
       <span class="table-party">${escapeHtml(tableSecondary(table))}</span>
@@ -547,8 +556,7 @@ function renderParty(party) {
           data-party-id="${party.id}"
           data-focus-key="party-${party.id}"
           aria-pressed="${selected}"
-          aria-label="${escapeHtml(`${party.name}, party of ${party.size}. ${hostAction === "plan" ? "Select to override the agent plan." : hostAction === "seat" ? "Select to seat now." : "Assignment opens at arrival."}`)}"
-          ${actionable ? "" : "disabled"}
+          aria-label="${escapeHtml(`${party.name}, party of ${party.size}. ${hostAction === "plan" ? "Select to override the agent plan." : hostAction === "seat" ? "Select to seat now." : "Select to inspect or add a host note; assignment opens at arrival."}`)}"
         >
           <span class="party-time">
             <span>${minutesToTime(partyQueueMinute(party)).replace(" PM", "")}</span>
@@ -657,6 +665,12 @@ function renderInspector(activeParty) {
         <div class="inspector__state">${escapeHtml(instruction)}</div>
         ${activeParty.request ? `<div class="inspector__request"><small>${activeParty.request.source === "host" ? "Host note" : "Special request"}</small><span>${escapeHtml(activeParty.request.text)}</span></div>` : ""}
         ${activeParty.candidateReason ? `<div class="inspector__reason"><strong>Plan reason</strong><span>${escapeHtml(activeParty.candidateReason)}</span></div>` : ""}
+        ${["upcoming", "waiting"].includes(activeParty.status) ? `
+          <form class="inspector__note" data-form="add-host-note" data-party-id="${activeParty.id}">
+            <input type="text" name="note" maxlength="${HOST_NOTE_MAX_LENGTH}" placeholder="Host note for ${escapeHtml(activeParty.name)}…" aria-label="Host note for ${escapeHtml(activeParty.name)}" autocomplete="off" data-focus-key="note-${activeParty.id}" />
+            <button class="control control--quiet" type="submit">Add note</button>
+          </form>
+        ` : ""}
         <button class="control control--quiet" type="button" data-action="clear-selection">Clear</button>
       </aside>
     `;
@@ -1085,6 +1099,32 @@ root.addEventListener("click", (event) => {
     if (!result.ok) showFeedback(result.error.message);
   }
   render();
+});
+
+root.addEventListener("submit", (event) => {
+  const form = event.target.closest('[data-form="add-host-note"]');
+  if (!form) return;
+  event.preventDefault();
+  const input = form.querySelector("input[name=note]");
+  const result = addHostNote(state, form.dataset.partyId, input.value, { source: "host" });
+  interactionHold = false;
+  if (!result.ok) {
+    showFeedback(result.error.message);
+  } else {
+    feedback = { message: `Note added for ${getParty(state, form.dataset.partyId)?.name || "the party"}. The attached agent is asked to review.`, tone: "success" };
+  }
+  render();
+});
+
+root.addEventListener("focusin", (event) => {
+  if (event.target.matches('[data-form="add-host-note"] input')) interactionHold = true;
+});
+
+root.addEventListener("focusout", (event) => {
+  if (event.target.matches('[data-form="add-host-note"] input')) {
+    interactionHold = false;
+    if (!event.target.value) render();
+  }
 });
 
 root.addEventListener("change", (event) => {

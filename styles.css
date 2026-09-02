@@ -1372,6 +1372,45 @@ svg {
   border-color: var(--color-accent);
 }
 
+.table-mark {
+  align-items: center;
+  color: var(--color-error);
+  display: inline-flex;
+  inset-block-start: var(--space-3xs);
+  inset-inline-start: var(--space-3xs);
+  position: absolute;
+}
+
+.table-mark .icon svg {
+  height: 0.75rem;
+  width: 0.75rem;
+}
+
+.inspector__note {
+  display: flex;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.inspector__note input {
+  background: var(--color-paper);
+  border: var(--rule-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: var(--text-sm);
+  min-height: 2.75rem;
+  min-width: 0;
+  padding-inline: var(--space-sm);
+}
+
+.inspector__note input:focus-visible {
+  border-color: var(--color-focus);
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
 .inspector__request {
   border-inline-start: 2px solid var(--color-warning);
   color: var(--color-ink-2);

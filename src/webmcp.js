@@ -1,5 +1,6 @@
 import { parseTime } from "./data.js";
 import {
+  addHostNote,
   advanceTo,
   attachExternalAgent,
   assignTable,
@@ -17,6 +18,7 @@ import {
   releaseHold,
   scoreAssignment,
   setCandidates,
+  setPartyMarks,
   setWeights,
   unassignParty,
   unlockTable
@@ -283,13 +285,47 @@ export function createToolDefinitions({ state, clock, onChange }) {
     },
     {
       name: "mark_party",
-      description: "Mark a party arrived, no-show, or left. Arrived puts an upcoming reservation onto the active queue.",
+      description: "Mark a party arrived, no-show, or left, and/or set service marks. Arrived puts an upcoming reservation onto the active queue. rush tightens the expected finish to 60 minutes and shows on the floor; allergy shows a discreet icon on the table for servers; discreet records a private flag that renders nothing on the floor. Provide status or at least one mark.",
       inputSchema: objectSchema(
-        { party_id: stringId("Party id."), status: { type: "string", enum: ["arrived", "no_show", "left"] } },
-        ["party_id", "status"]
+        {
+          party_id: stringId("Party id."),
+          status: { type: "string", enum: ["arrived", "no_show", "left"], description: "Optional lifecycle change." },
+          rush: { type: "boolean", description: "Guest must leave early; expected finish becomes 60 minutes and is visible on the floor." },
+          allergy: { type: "boolean", description: "Allergy at the table; a discreet icon shows on the floor for servers." },
+          discreet: { type: "boolean", description: "Private flag for host and agent only; nothing renders on the floor." }
+        },
+        ["party_id"]
       ),
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute: ({ party_id, status }) => mutate(() => markParty(state, party_id, status, { source: "agent" }))
+      execute: ({ party_id, status, rush, allergy, discreet }) => mutate(() => {
+        const marks = { rush, allergy, discreet };
+        const hasMarks = Object.values(marks).some((value) => value != null);
+        if (status == null && !hasMarks) return { ok: false, error: { code: "INVALID_INPUT", message: "Provide status or at least one of rush, allergy, discreet." } };
+        let result = { ok: true, partyId: party_id };
+        if (status != null) {
+          result = markParty(state, party_id, status, { source: "agent" });
+          if (!result.ok) return result;
+        }
+        if (hasMarks) {
+          const marked = setPartyMarks(state, party_id, marks, { source: "agent" });
+          if (!marked.ok) return marked;
+          result = { ...result, marks: marked.marks };
+        }
+        return result;
+      })
+    },
+    {
+      name: "add_host_note",
+      description: "Record a free-text note on a party (1–280 characters). Creates the party's special request with source host, or appends to an existing request with a — separator. Host-typed notes are not graded; they exist so context can be injected mid-service and the attached agent is asked to react.",
+      inputSchema: objectSchema(
+        {
+          party_id: stringId("Party id from get_queue."),
+          text: { type: "string", minLength: 1, maxLength: 280, description: "Natural-language note for the floor." }
+        },
+        ["party_id", "text"]
+      ),
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute: ({ party_id, text }) => mutate(() => addHostNote(state, party_id, text, { source: "agent" }))
     },
     {
       name: "set_weights",

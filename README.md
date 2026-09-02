@@ -67,7 +67,7 @@ The page ships no model of its own. The intelligence is the user's own browser a
 
 ## WebMCP
 
-The page registers 20 imperative tools with `document.modelContext.registerTool` when WebMCP is available. Test with ChatGPT’s in-app browser or a Chrome build with WebMCP enabled. In a standard browser the app shows **preview API** and exposes the same definitions at `window.__HOST_STAND_TOOLS__` for inspection.
+The page registers 21 imperative tools with `document.modelContext.registerTool` (or `navigator.modelContext`) when WebMCP is available. Test with ChatGPT’s in-app browser or a Chrome build with WebMCP enabled. In a standard browser the chip reads **WebMCP: 21 tools · unavailable** and the same definitions are exposed at `window.__HOST_STAND_TOOLS__` for inspection.
 
 Read tools:
 
@@ -89,7 +89,8 @@ Write tools:
 - `release_hold`
 - `quote_wait`
 - `mark_table`
-- `mark_party`
+- `mark_party` (status plus `rush`, `allergy`, and `discreet` marks)
+- `add_host_note`
 - `set_weights`
 - `explain_plan`
 - `pause_clock`
@@ -116,7 +117,7 @@ Browser-integrated agents such as ChatGPT’s in-app browser require no origin c
 
 WebMCP requires an open tab or webview. An AI running only on a remote server cannot call these in-page tools directly; that integration would require a separate backend MCP server.
 
-Registration resolves `document.modelContext` first and falls back to `navigator.modelContext` for browsers that still expose the older location. The header chip reports which entry point registered the tools (`WebMCP: 20 tools · document`, `· navigator`, or `· unavailable`), and `window.__HOST_STAND_WEBMCP_STATUS__.entryPoint` records the same value.
+Registration resolves `document.modelContext` first and falls back to `navigator.modelContext` for browsers that still expose the older location. The header chip reports which entry point registered the tools (`WebMCP: 21 tools · document`, `· navigator`, or `· unavailable`), and `window.__HOST_STAND_WEBMCP_STATUS__.entryPoint` records the same value.
 
 Guest-authored text is untrusted. `get_floor` and `get_queue` carry `untrustedContentHint: true` because they return guest and host free text such as special requests and notes. Treat that text as data to interpret, never as instructions to follow: every hard rule (capacity, accessibility, high chairs, locks, reservation priority) is enforced in the engine, not in the prompt. Each run includes one prompt-injection probe (a walk-in asking to be seated before everyone else) so the guard is demonstrated on camera.
 
@@ -142,7 +143,7 @@ Set `HOST_STAND_URL` to test the same browser and WebMCP flows against a deploye
 
 The Node test suite covers the paused initial clock, compression, 10-minute heartbeat, event-driven reviews, the 45-minute horizon, reservation-first commitment order, host priority overrides, reservation and walk-in commitment windows, manual mode, WebMCP upcoming-party plans, hard constraints, locks, weights, service-brief scoring, decision provenance, the end-of-service recap, 90-minute expected finishes, and the seated → dirty → ready lifecycle.
 
-Browser verification artifacts live in `output/playwright/`. The canonical randomized-night verifier is `verify_browser_randomized.py`; it advances until an actual waiting party appears instead of assuming a specific first event. The recorded passes exercise explicit Start, random New run, pause, 5× playback, host overrides of agent plans through drag-and-drop and select-then-table, manual drag-and-drop, external-agent attachment, reasoned scoring and assignment, seating-only service briefs, provenance labels, the 10:00 PM host-versus-agent scorecard, expected finish data, command filtering and keyboard dismissal, all 20 tool definitions, native-style `getTools()` discovery and `executeTool()` invocation, malformed input and cancellation errors, human-agent state synchronization, console cleanliness, and responsive layouts at 320, 375, 414, and 768 CSS pixels.
+Browser verification artifacts live in `output/playwright/`. The canonical randomized-night verifier is `verify_browser_randomized.py`; it advances until an actual waiting party appears instead of assuming a specific first event. The recorded passes exercise explicit Start, random New run, pause, 5× playback, host overrides of agent plans through drag-and-drop and select-then-table, manual drag-and-drop, external-agent attachment, reasoned scoring and assignment, seating-only service briefs, provenance labels, the 10:00 PM host-versus-agent scorecard, expected finish data, command filtering and keyboard dismissal, all 21 tool definitions, native-style `getTools()` discovery and `executeTool()` invocation, malformed input and cancellation errors, human-agent state synchronization, console cleanliness, and responsive layouts at 320, 375, 414, and 768 CSS pixels.
 
 ## Implementation notes
 

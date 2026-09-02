@@ -27,7 +27,7 @@ test("the WebMCP catalog is discoverable, unique, and uses current annotations",
   const readTools = new Set(["get_floor", "get_queue", "score_assignment"]);
   const untrustedTools = new Set(["get_floor", "get_queue"]);
 
-  assert.equal(definitions.length, 20);
+  assert.equal(definitions.length, 21);
   assert.equal(new Set(names).size, definitions.length);
   for (const tool of definitions) {
     assert.match(tool.name, /^[A-Za-z0-9_.-]{1,128}$/);
@@ -181,6 +181,57 @@ test("upcoming reservations can be scored but cannot be seated before arrival", 
   const assignment = await execute("assign_table", { party_id: "alvarez", table_id: "R1" });
   assert.equal(assignment.ok, false);
   assert.equal(assignment.error.code, "ILLEGAL_ASSIGNMENT");
+});
+
+test("add_host_note creates or appends a host-sourced request and asks the agent to review", async () => {
+  const { execute, state } = createHarness();
+  assert.equal((await execute("attach_agent", { agent_name: "Table Pilot", mode: "advisory" })).ok, true);
+  assert.equal((await execute("set_candidates", { party_id: "patel", table_ids: ["V1"], reason: "Window." })).ok, true);
+  assert.equal(state.agentReview.status, "planned");
+
+  const created = await execute("add_host_note", { party_id: "patel", text: "Birthday candle at dessert." });
+  assert.equal(created.ok, true);
+  assert.deepEqual(created.request, { text: "Birthday candle at dessert.", source: "host" });
+  assert.equal(state.parties.find((party) => party.id === "patel").request.ground, null);
+  assert.equal(state.agentReview.status, "review_due");
+  assert.equal(state.agentReview.reason, "host note added");
+
+  const appended = await execute("add_host_note", { party_id: "patel", text: "Also gluten-free." });
+  assert.equal(appended.request.text, "Birthday candle at dessert. — Also gluten-free.");
+  const queue = await execute("get_queue");
+  assert.equal(queue.reservations.find((party) => party.id === "patel").request.source, "host");
+  assert.equal(queue.openRequests.find((request) => request.partyId === "patel").status, "open");
+
+  assert.equal((await execute("add_host_note", { party_id: "patel", text: "" })).error.code, "INVALID_INPUT");
+  assert.equal((await execute("add_host_note", { party_id: "patel", text: "x".repeat(281) })).error.code, "INVALID_INPUT");
+  assert.equal((await execute("add_host_note", { party_id: "nobody", text: "Hello" })).error.code, "PARTY_NOT_FOUND");
+});
+
+test("mark_party accepts rush, allergy, and discreet marks alongside status", async () => {
+  const { execute, state } = createHarness();
+  await execute("set_clock", { time: "6:00 PM", running: false });
+  assert.equal((await execute("assign_table", { party_id: "patel", table_id: "V1", reason: "Window." })).ok, true);
+  const table = state.tables.find((entry) => entry.id === "V1");
+  assert.equal(table.dueAt, 18 * 60 + 90);
+
+  const rushed = await execute("mark_party", { party_id: "patel", rush: true });
+  assert.equal(rushed.ok, true);
+  assert.deepEqual(rushed.marks, { rush: true, allergy: false, discreet: false });
+  assert.equal(table.dueAt, 18 * 60 + 60);
+  const floor = await execute("get_floor");
+  assert.deepEqual(floor.tables.find((entry) => entry.id === "V1").partyMarks, { rush: true, allergy: false });
+
+  const discreet = await execute("mark_party", { party_id: "brooks", discreet: true });
+  assert.equal(discreet.ok, true);
+  assert.equal(state.activity[0].detail, "Brooks · note recorded");
+
+  const combined = await execute("mark_party", { party_id: "rossi", status: "arrived", allergy: true });
+  assert.equal(combined.ok, true);
+  assert.equal(combined.status, "waiting");
+  assert.equal(state.parties.find((party) => party.id === "rossi").marks.allergy, true);
+
+  assert.equal((await execute("mark_party", { party_id: "patel" })).error.code, "INVALID_INPUT");
+  assert.equal((await execute("mark_party", { party_id: "patel", rush: "yes" })).error.code, "INVALID_INPUT");
 });
 
 test("an already-aborted WebMCP call returns a structured cancellation error", async () => {

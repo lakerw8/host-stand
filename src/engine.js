@@ -810,6 +810,27 @@ export function markParty(state, partyId, status, options = {}) {
   return success(state, { partyId, status: party.status });
 }
 
+export const HOST_NOTE_MAX_LENGTH = 280;
+
+// A host note is free text typed mid-service. It becomes the party's request
+// (source host, no hidden ground truth) or is appended to an existing one, and
+// the attached agent is asked to react.
+export function addHostNote(state, partyId, text, options = {}) {
+  const party = getParty(state, partyId);
+  if (!party) return failure(state, "PARTY_NOT_FOUND", `Party ${partyId} was not found.`);
+  const clean = String(text || "").trim().slice(0, HOST_NOTE_MAX_LENGTH);
+  if (!clean) return failure(state, "NOTE_REQUIRED", `Provide a note between 1 and ${HOST_NOTE_MAX_LENGTH} characters.`);
+  if (party.request) {
+    party.request.text = `${party.request.text} — ${clean}`;
+    party.request.hostNotes = [...(party.request.hostNotes || []), clean];
+  } else {
+    party.request = { id: `note-${party.id}`, template: null, category: null, text: clean, source: "host", ground: null, hostNotes: [clean] };
+  }
+  logActivity(state, "add_host_note", `${party.name} · ${clean}`, options.source || "host");
+  requestAgentReview(state, "host note added");
+  return success(state, { partyId, request: { text: party.request.text, source: party.request.source } });
+}
+
 export const PARTY_MARK_KEYS = Object.freeze(["rush", "allergy", "discreet"]);
 
 export function setPartyMarks(state, partyId, marks = {}, options = {}) {
