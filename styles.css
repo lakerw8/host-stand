@@ -3382,3 +3382,36 @@ svg {
     scroll-behavior: auto;
   }
 }
+
+/* Short viewports: the floor's 36px minimum row must hold three lines of table
+   text without the flex children shrinking into each other. */
+.table-id,
+.table-party,
+.table-status {
+  flex-shrink: 0;
+}
+
+@media (max-height: 50rem) {
+  .table-node {
+    gap: 0;
+    padding: 1px var(--space-2xs);
+  }
+
+  .table-id,
+  .table-party,
+  .table-status {
+    line-height: 1;
+    margin: 0;
+  }
+
+  .table-status--due .icon svg {
+    height: 0.6rem;
+    width: 0.6rem;
+  }
+}
+
+@media (max-height: 48rem) {
+  .table-id {
+    font-size: 0.75rem;
+  }
+}
