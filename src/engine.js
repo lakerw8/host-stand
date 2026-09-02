@@ -1815,10 +1815,18 @@ function nextRecommendedActions(state) {
       ...upcomingRequests
     ];
   }
+  const kitchenDelayActive = Boolean(state.kitchenDelayUntil && state.now < state.kitchenDelayUntil);
+  const waitingWalkIns = state.parties.filter((party) => party.source === "walk_in" && party.status === "waiting" && !party.committedTableId);
+  const delayActions = kitchenDelayActive
+    ? [
+      `Kitchen delay until ${minutesToTime(state.kitchenDelayUntil)}: ${waitingWalkIns.length ? `quote_wait for ${waitingWalkIns.slice(0, 3).map((party) => party.name).join(", ")} with honest minutes` : "quote honest waits for any walk-in that arrives"}`,
+      "Review hold_table commitments; kitchen-zone tables score lower until the delay clears"
+    ]
+    : [];
   const base = state.agentReview.status === "review_due"
     ? ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason that says how the plan honors any special request", "Explain the current whole-floor plan"]
     : ["Keep tentative tables current for parties inside the 45-minute horizon", "Re-read get_floor after every write"];
-  return [...upcomingRequests, ...base, `Pass expected_version: ${state.floorVersion} on your next write so a host change is never clobbered`];
+  return [...delayActions, ...upcomingRequests, ...base, `Pass expected_version: ${state.floorVersion} on your next write so a host change is never clobbered`];
 }
 
 export function getFloorSnapshot(state) {
@@ -1850,6 +1858,14 @@ export function getFloorSnapshot(state) {
     capacity: RESTAURANT_CAPACITY,
     tableUnitCount: state.tables.length,
     kitchenDelay: Boolean(state.kitchenDelayUntil && state.now < state.kitchenDelayUntil),
+    kitchenDelayUntil: state.kitchenDelayUntil,
+    disruptions: state.disruptions.slice(-20).map((disruption) => ({
+      type: disruption.type,
+      at: disruption.at,
+      partyId: disruption.partyId ?? null,
+      detail: disruption.detail,
+      resolved: Boolean(disruption.resolved)
+    })),
     serviceBrief: clone(state.serviceBrief),
     sectionRequests: state.sectionRequests.map((request) => ({
       id: request.id,
