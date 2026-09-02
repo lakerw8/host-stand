@@ -96,7 +96,7 @@ def main():
         assert floor_contract["geometry"]["entrance"] == {"column": 1, "row": 1}
         assert all("layout" in table and "distanceToEntrance" in table for table in floor_contract["tables"])
         assert page.locator(".mode-indicator").inner_text().strip() == "Manual host"
-        assert page.locator(".mcp-status--strip").inner_text().strip() == "WebMCP: 22 tools · unavailable"
+        assert page.locator(".mcp-status--strip").inner_text().strip() == "WebMCP: 22 tools · not in this browser"
         assert page.locator('[data-action="toggle-agent"]').count() == 0
         product_text = page.locator(".product-bar").inner_text().lower()
         assert "basic algo" not in product_text

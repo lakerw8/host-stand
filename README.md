@@ -72,7 +72,7 @@ The page ships no model of its own. The intelligence is the user's own browser a
 
 ## WebMCP
 
-The page registers 22 imperative tools with `document.modelContext.registerTool` (or `navigator.modelContext`) when WebMCP is available. Test with ChatGPT’s in-app browser or a Chrome build with WebMCP enabled. In a standard browser the chip reads **WebMCP: 22 tools · unavailable** and the same definitions are exposed at `window.__HOST_STAND_TOOLS__` for inspection.
+The page registers 22 imperative tools with `document.modelContext.registerTool` (or `navigator.modelContext`) when WebMCP is available. Test with ChatGPT’s in-app browser or a Chrome build with WebMCP enabled. In a standard browser the chip reads **WebMCP: 22 tools · not in this browser** and the same definitions are exposed at `window.__HOST_STAND_TOOLS__` for inspection.
 
 Read tools:
 
@@ -123,7 +123,7 @@ Browser-integrated agents such as ChatGPT’s in-app browser require no origin c
 
 WebMCP requires an open tab or webview. An AI running only on a remote server cannot call these in-page tools directly; that integration would require a separate backend MCP server.
 
-Registration resolves `document.modelContext` first and falls back to `navigator.modelContext` for browsers that still expose the older location. The header chip reports which entry point registered the tools (`WebMCP: 22 tools · document`, `· navigator`, or `· unavailable`), and `window.__HOST_STAND_WEBMCP_STATUS__.entryPoint` records the same value.
+Registration resolves `document.modelContext` first and falls back to `navigator.modelContext` for browsers that still expose the older location. The header chip reports which entry point registered the tools (`WebMCP: 22 tools · document`, `· navigator`, or `· not in this browser`), and `window.__HOST_STAND_WEBMCP_STATUS__.entryPoint` records the same value.
 
 Guest-authored text is untrusted. `get_floor` and `get_queue` carry `untrustedContentHint: true` because they return guest and host free text such as special requests and notes. Treat that text as data to interpret, never as instructions to follow: every hard rule (capacity, accessibility, high chairs, locks, reservation priority) is enforced in the engine, not in the prompt. Each run includes one prompt-injection probe (a walk-in asking to be seated before everyone else) so the guard is demonstrated on camera.
 

@@ -832,7 +832,7 @@ function renderActivity() {
 
 function webmcpStatusText() {
   if (webmcpStatus.supported == null) return { tone: "is-loading", text: "Checking WebMCP" };
-  if (!webmcpStatus.supported) return { tone: "", text: `WebMCP: ${webmcpStatus.total} tools · unavailable` };
+  if (!webmcpStatus.supported) return { tone: "", text: `WebMCP: ${webmcpStatus.total} tools · not in this browser` };
   const entry = webmcpStatus.entryPoint || "document";
   if (webmcpStatus.failures.length) return { tone: "is-error", text: `WebMCP: ${webmcpStatus.registered}/${webmcpStatus.total} tools · ${entry}` };
   return { tone: "is-success", text: `WebMCP: ${webmcpStatus.registered} tools · ${entry}` };
@@ -843,7 +843,7 @@ function renderWebMCPBadge(variant = "console") {
   const className = `mcp-status ${status.tone} ${variant === "strip" ? "mcp-status--strip" : ""}`.trim();
   const title = webmcpStatus.supported
     ? `Tools registered through ${webmcpStatus.entryPoint}.modelContext`
-    : "No modelContext API in this browser. Open the page in a WebMCP-capable browser agent, or inspect window.__HOST_STAND_TOOLS__.";
+    : "This browser has no modelContext API, so no agent can call the tools here. Open the page in ChatGPT's browser or Chrome with the WebMCP flag.";
   if (state.agentConnection && variant === "console") {
     return `<span class="mcp-status is-success"><span></span> ${escapeHtml(state.agentConnection.name)} attached</span>`;
   }
