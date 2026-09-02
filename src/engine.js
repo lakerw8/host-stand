@@ -1,14 +1,24 @@
 import {
+  ADJACENCY_RULE,
+  DISTANCE_RULE,
+  ENTRANCE,
   EXPECTED_DWELL_MINUTES,
+  FLOOR_GRID,
+  NEAR_ENTRANCE_MAX_DISTANCE,
+  REQUEST_CATEGORY_LABELS,
   RESTAURANT_CAPACITY,
   SCRIPTED_EVENTS,
+  SERVER_SECTIONS,
   SERVICE_END,
   SERVICE_START,
   TABLE_DEFINITIONS,
   createNightParties,
   createRandomNightScenario,
   createServiceBrief,
-  minutesToTime
+  distanceToEntrance,
+  minutesToTime,
+  tableDistance,
+  tablesAdjacent
 } from "./data.js";
 
 const clone = (value) => (
@@ -23,6 +33,7 @@ export const AGENT_HEARTBEAT_MINUTES = 10;
 export const AGENT_PLANNING_HORIZON_MINUTES = 45;
 export const AGENT_FREEZE_WINDOW_MINUTES = 5;
 export const TABLE_RESET_MINUTES = 3;
+export const RUSH_DWELL_MINUTES = 60;
 
 const runtimeTable = (definition) => ({
   ...clone(definition),
@@ -57,7 +68,13 @@ const runtimeParty = (definition) => ({
   assignmentOrigin: null,
   assignmentReason: null,
   candidateReason: null,
-  seatingScore: null
+  candidateReasonSupplied: false,
+  reasonSupplied: false,
+  seatingScore: null,
+  request: definition.request ? clone(definition.request) : null,
+  linkedPartyIds: definition.linkedPartyIds ? [...definition.linkedPartyIds] : [],
+  marks: { rush: false, allergy: false, discreet: false },
+  requestTrace: { blockedAttempts: 0, confirmedSize: null, heldTableSeatsAtConfirm: null }
 });
 
 const manualReview = () => ({
@@ -79,6 +96,7 @@ export function createInitialState(options = {}) {
         parties: scriptedParties,
         events: clone(SCRIPTED_EVENTS),
         serviceBrief: createServiceBrief(scriptedParties, `${scenarioSeed}-brief`, { excludedPartyIds: ["alvarez"] }),
+        sectionRequests: [],
         seed: String(scenarioSeed),
         runCode: "SATURDAY"
       };
@@ -94,6 +112,8 @@ export function createInitialState(options = {}) {
     parties: scenario.parties.map(runtimeParty),
     events: scenario.events,
     serviceBrief: clone(scenario.serviceBrief),
+    sectionRequests: clone(scenario.sectionRequests || []),
+    disruptions: [],
     scenarioSeed: scenario.seed,
     runCode: scenario.runCode,
     preferenceSeed: scenario.seed,
@@ -360,6 +380,7 @@ function clearCandidatePlan(party) {
   party.candidateUpdatedAt = null;
   party.candidateFrozen = false;
   party.candidateReason = null;
+  party.candidateReasonSupplied = false;
 }
 
 
@@ -420,10 +441,18 @@ function assignmentReasonFor(scored, origin, suppliedReason = null) {
   return scored.reasons.slice(0, 2).join("; ");
 }
 
+function reasonWasSupplied(party, options) {
+  if (options.reasonSupplied != null) return Boolean(options.reasonSupplied);
+  if (String(options.reason || "").trim()) return true;
+  return Boolean(options.skipPlan && party.candidateReasonSupplied);
+}
+
 function seatPartyAtTable(state, party, table, source, options = {}) {
   const scored = scoreAssignment(state, party.id, table.id, { forCandidate: true, source });
   const assignmentOrigin = assignmentOriginFor(state, source, options.origin);
   const assignmentReason = assignmentReasonFor(scored, assignmentOrigin, options.reason || party.assignmentReason || party.candidateReason);
+  const reasonSupplied = reasonWasSupplied(party, options) || party.reasonSupplied;
+  const priorityBypassed = Boolean(getReservationPriorityBlocker(state, party));
   const origin = party.source === "walk_in" ? party.arrivedAt : party.reservedFor;
   const wait = Math.max(0, state.now - origin);
   table.status = "seated";
@@ -432,7 +461,7 @@ function seatPartyAtTable(state, party, table, source, options = {}) {
   table.holdUntil = null;
   table.nextPartyId = null;
   table.seatedAt = state.now;
-  table.dueAt = state.now + EXPECTED_DWELL_MINUTES;
+  table.dueAt = state.now + (party.marks.rush ? RUSH_DWELL_MINUTES : EXPECTED_DWELL_MINUTES);
   table.dirtyUntil = null;
   table.assignmentOrigin = clone(assignmentOrigin);
   table.assignmentReason = assignmentReason;
@@ -449,7 +478,9 @@ function seatPartyAtTable(state, party, table, source, options = {}) {
   party.assignedBy = source;
   party.assignmentOrigin = clone(assignmentOrigin);
   party.assignmentReason = assignmentReason;
+  party.reasonSupplied = reasonSupplied;
   party.candidateReason = null;
+  party.candidateReasonSupplied = false;
   party.seatingScore = scored;
 
   const record = {
@@ -464,7 +495,9 @@ function seatPartyAtTable(state, party, table, source, options = {}) {
     matchedPreferences: scored.matchedPreferences.length,
     source,
     assignmentOrigin: clone(assignmentOrigin),
-    assignmentReason
+    assignmentReason,
+    reasonSupplied,
+    priorityBypassed
   };
   state.seatingRecords.push(record);
   state.coversHistory.push({ minute: state.now, covers: party.size });
@@ -487,6 +520,7 @@ export function assignTable(state, partyId, tableId, options = {}) {
   if (party.status === "seated") return failure(state, "ALREADY_SEATED", `${party.name} is already seated; use move_party.`);
   const priorityBlocker = source === "host" ? null : getReservationPriorityBlocker(state, party);
   if (priorityBlocker) {
+    party.requestTrace.blockedAttempts += 1;
     return failure(
       state,
       "RESERVATION_PRIORITY",
@@ -501,6 +535,7 @@ export function assignTable(state, partyId, tableId, options = {}) {
     const assignmentOrigin = assignmentOriginFor(state, source, options.origin);
     const scored = scoreAssignment(state, party.id, table.id, { forCandidate: true, source });
     const assignmentReason = assignmentReasonFor(scored, assignmentOrigin, options.reason || party.assignmentReason || party.candidateReason);
+    party.reasonSupplied = reasonWasSupplied(party, options);
     table.nextPartyId = party.id;
     party.committedTableId = table.id;
     party.candidateTableIds = [];
@@ -590,6 +625,7 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
   party.candidateTableIds = uniqueIds;
   party.candidateState = source === "host" ? "host_override" : "tentative";
   party.candidateUpdatedAt = state.now;
+  party.candidateReasonSupplied = Boolean(String(options.reason || "").trim());
   party.candidateReason = String(options.reason || "").trim().slice(0, 180)
     || (source === "host" ? "Manual host override." : "Agent-ranked table plan.");
   party.candidateFrozen = party.status === "upcoming" && party.reservedFor - state.now <= AGENT_FREEZE_WINDOW_MINUTES;
@@ -661,6 +697,7 @@ export function holdTable(state, tableId, partyId, until, options = {}) {
   }
   const priorityBlocker = source === "host" ? null : getReservationPriorityBlocker(state, party);
   if (priorityBlocker) {
+    party.requestTrace.blockedAttempts += 1;
     return failure(
       state,
       "RESERVATION_PRIORITY",
@@ -773,6 +810,27 @@ export function markParty(state, partyId, status, options = {}) {
   return success(state, { partyId, status: party.status });
 }
 
+export const PARTY_MARK_KEYS = Object.freeze(["rush", "allergy", "discreet"]);
+
+export function setPartyMarks(state, partyId, marks = {}, options = {}) {
+  const party = getParty(state, partyId);
+  if (!party) return failure(state, "PARTY_NOT_FOUND", `Party ${partyId} was not found.`);
+  const entries = Object.entries(marks).filter(([key]) => PARTY_MARK_KEYS.includes(key) && marks[key] != null);
+  if (!entries.length) return failure(state, "MARK_REQUIRED", `Provide at least one of ${PARTY_MARK_KEYS.join(", ")}.`);
+  if (entries.some(([, value]) => typeof value !== "boolean")) return failure(state, "INVALID_MARK", "Marks must be booleans.");
+  for (const [key, value] of entries) party.marks[key] = value;
+  if (party.marks.rush && party.status === "seated") {
+    const table = getTable(state, party.committedTableId);
+    if (table?.partyId === party.id && table.seatedAt != null) {
+      table.dueAt = Math.min(table.dueAt ?? Infinity, Math.max(state.now, table.seatedAt + RUSH_DWELL_MINUTES));
+    }
+  }
+  const visible = entries.filter(([key]) => key !== "discreet").map(([key, value]) => `${key} ${value ? "on" : "off"}`);
+  logActivity(state, "mark_party", `${party.name} · ${visible.length ? visible.join(" · ") : "note recorded"}`, options.source || "agent");
+  requestAgentReview(state, "party marks changed");
+  return success(state, { partyId, marks: clone(party.marks) });
+}
+
 export function setWeights(state, sat, turn = 1 - sat, options = {}) {
   const satNumber = Number(sat);
   const turnNumber = Number(turn);
@@ -807,7 +865,8 @@ function seatCommittedPartyIfReady(state, table) {
     source: nextParty.assignedBy || "agent",
     skipPlan: true,
     origin: nextParty.assignmentOrigin,
-    reason: nextParty.assignmentReason
+    reason: nextParty.assignmentReason,
+    reasonSupplied: nextParty.reasonSupplied
   });
   if (!result.ok && result.error?.code === "RESERVATION_PRIORITY" && nextParty.assignedBy !== "host") {
     nextParty.committedTableId = null;
@@ -892,22 +951,63 @@ function processEvent(state, event) {
       party.status = "no_show";
       clearCandidatePlan(party);
       party.hostOverrideTableId = null;
+      releasePartyHolds(state, party);
+      state.disruptions.push({ type: "no_show", at: state.now, partyId: party.id, detail: `${party.name} did not show for ${minutesToTime(party.reservedFor)}`, resolved: true });
       logActivity(state, "mark_party", `${party.name} → no-show`, "clock");
       changed = true;
     }
   }
   if (event.type === "kitchen_delay") {
     state.kitchenDelayUntil = event.until;
+    state.disruptions.push({ type: "kitchen_delay", at: state.now, partyId: null, detail: `Kitchen delay through ${minutesToTime(event.until)}`, until: event.until, resolved: false });
     logActivity(state, "get_floor", `Kitchen delay through ${minutesToTime(event.until)}`, "clock");
     changed = true;
   }
+  if (event.type === "party_update") {
+    for (const update of event.updates || []) {
+      const party = getParty(state, update.partyId);
+      if (!party || ["left", "no_show"].includes(party.status) || update.size == null) continue;
+      const previousSize = party.size;
+      const heldTable = state.tables.find((table) => (
+        table.heldForPartyId === party.id || table.nextPartyId === party.id || (party.committedTableId && table.id === party.committedTableId)
+      ));
+      party.size = update.size;
+      party.requestTrace.confirmedSize = update.size;
+      party.requestTrace.heldTableSeatsAtConfirm = heldTable ? heldTable.seats : null;
+      if (heldTable && heldTable.seats < party.size && party.status !== "seated") {
+        releasePartyHolds(state, party);
+        logActivity(state, "release_hold", `${heldTable.id} released · ${party.name} outgrew it`, "clock");
+      }
+      const detail = party.size === previousSize
+        ? `${party.name} confirmed ${party.size}`
+        : `${party.name} confirmed ${previousSize} → ${party.size}`;
+      state.disruptions.push({ type: "party_size_change", at: state.now, partyId: party.id, detail, resolved: false });
+      logActivity(state, "party_update", detail, "clock");
+      changed = true;
+    }
+  }
   return changed;
+}
+
+function releasePartyHolds(state, party) {
+  for (const table of state.tables) {
+    if (table.heldForPartyId === party.id) {
+      if (table.status === "held") table.status = "free";
+      table.heldForPartyId = null;
+      table.holdUntil = null;
+    }
+    if (table.nextPartyId === party.id) table.nextPartyId = null;
+  }
+  if (party.status !== "seated") party.committedTableId = null;
 }
 
 function processMinute(state) {
   const reviewReasons = [];
   if (state.kitchenDelayUntil != null && state.kitchenDelayUntil <= state.now) {
     state.kitchenDelayUntil = null;
+    for (const disruption of state.disruptions) {
+      if (disruption.type === "kitchen_delay" && !disruption.resolved) disruption.resolved = true;
+    }
     logActivity(state, "get_floor", "Kitchen delay cleared", "clock");
     reviewReasons.push("kitchen delay cleared");
   }
@@ -1144,18 +1244,327 @@ export function getServiceRecap(state) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Special request grading
+//
+// Each predicate is a pure function over final state: seating records, marks,
+// the party-update trace, and floor geometry. The agent never sees `ground`;
+// it must infer intent from the request text. Grades stay hidden until the
+// 10 PM recap.
+// ---------------------------------------------------------------------------
+
+const verdict = (ok, reason, partial = ok ? 1 : 0) => ({ ok: Boolean(ok), partial: clamp(partial), reason });
+const seatedTable = (state, partyId) => {
+  const record = latestSeatingRecord(state, partyId);
+  return { record, table: record ? getTable(state, record.tableId) : null };
+};
+const zoneLabel = (zone) => SERVER_SECTIONS[zone]?.label || `${zone} zone`;
+
+const REQUEST_PREDICATES = {
+  zoneNotIn(state, party, zones, { record, table, ground }) {
+    if (!table) return verdict(false, "never seated");
+    if (ground.ifSeatedAfter != null && record.minute < ground.ifSeatedAfter) {
+      return verdict(true, `seated at ${minutesToTime(record.minute)}, before the ${minutesToTime(ground.ifSeatedAfter)} cutoff, so ${table.id} in the ${zoneLabel(table.zone)} was fine`);
+    }
+    const ok = !zones.includes(table.zone);
+    return verdict(ok, ok ? `${table.id} kept them out of the ${zones.map(zoneLabel).join(" and ")}` : `${table.id} is in the ${zoneLabel(table.zone)}, which they asked to avoid`);
+  },
+  zoneIn(state, party, zones, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const ok = zones.includes(table.zone);
+    return verdict(ok, ok ? `${table.id} sits in the ${zoneLabel(table.zone)}` : `${table.id} is in the ${zoneLabel(table.zone)}; they needed ${zones.map(zoneLabel).join(" or ")}`);
+  },
+  quietOrBooth(state, party, expected, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const ok = Boolean(table.quiet || table.shape === "booth") === expected;
+    return verdict(ok, ok ? `${table.id} is a quiet table or booth` : `${table.id} is neither quiet nor a booth`);
+  },
+  shapeNot(state, party, shape, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const ok = table.shape !== shape;
+    return verdict(ok, ok ? `${table.id} is not a ${shape}` : `${table.id} is a ${shape}, which they did not want`);
+  },
+  nearEntrance(state, party, expected, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const distance = distanceToEntrance(table);
+    const ok = (distance <= NEAR_ENTRANCE_MAX_DISTANCE) === expected;
+    return verdict(ok, `${table.id} is ${distance} grid units from the entrance (${ok ? "can" : "cannot"} see the door)`, ok ? 1 : clamp(1 - (distance - NEAR_ENTRANCE_MAX_DISTANCE) / 4));
+  },
+  adjacentTablesEmptyUntil(state, party, until, { record, table }) {
+    if (!table) return verdict(false, "never seated");
+    const neighbors = state.seatingRecords.filter((other) => (
+      other.partyId !== party.id
+      && other.minute >= record.minute
+      && other.minute < until
+      && tablesAdjacent(table, getTable(state, other.tableId))
+    ));
+    const ok = neighbors.length === 0;
+    return verdict(
+      ok,
+      ok ? `no party was seated next to ${table.id} before ${minutesToTime(until)}` : `${neighbors.length} ${neighbors.length === 1 ? "party was" : "parties were"} seated next to ${table.id} before ${minutesToTime(until)} (${neighbors.map((other) => other.tableId).join(", ")})`,
+      clamp(1 - neighbors.length / 3)
+    );
+  },
+  withinDistanceOfParty(state, party, { id, maxGrid }, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const other = getParty(state, id);
+    const otherSeat = seatedTable(state, id);
+    if (other?.status === "no_show") return verdict(true, `${other.name} never came, so proximity did not apply`);
+    if (!otherSeat.table) return verdict(false, `${other?.name || id} was never seated`);
+    const distance = tableDistance(table, otherSeat.table);
+    const ok = distance <= maxGrid;
+    return verdict(ok, `${table.id} is ${distance} grid units from ${other.name} at ${otherSeat.table.id} (asked for ${maxGrid} or closer)`, ok ? 1 : distance <= maxGrid + 1 ? 0.5 : 0);
+  },
+  notSameTable(state, party, id, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const otherSeat = seatedTable(state, id);
+    const ok = !otherSeat.table || otherSeat.table.id !== table.id;
+    return verdict(ok, ok ? "each family kept its own table" : "both families were put at the same table");
+  },
+  minDistanceFromParty(state, party, { id, minGrid }, { table }) {
+    if (!table) return verdict(false, "never seated");
+    const other = getParty(state, id);
+    const otherSeat = seatedTable(state, id);
+    if (other?.status === "no_show") return verdict(true, `${other.name} never came, so distance did not apply`);
+    if (!otherSeat.table) return verdict(false, `${other?.name || id} was never seated`);
+    const distance = tableDistance(table, otherSeat.table);
+    const ok = distance >= minGrid;
+    return verdict(ok, `${table.id} is ${distance} grid units from ${other.name} at ${otherSeat.table.id} (asked for at least ${minGrid})`, ok ? 1 : distance >= minGrid - 1 ? 0.5 : 0);
+  },
+  allTablesSameSection(state, party, expected, { ground }) {
+    const group = (party.request?.groupPartyIds || [party.id]).map((id) => seatedTable(state, id));
+    const seated = group.filter((entry) => entry.table);
+    if (seated.length < group.length) return verdict(false, `${group.length - seated.length} of ${group.length} linked tables were never seated`, seated.length / group.length * 0.5);
+    const zones = seated.map((entry) => entry.table.zone);
+    const majority = Math.max(...[...new Set(zones)].map((zone) => zones.filter((entry) => entry === zone).length));
+    const ok = majority === zones.length;
+    return verdict(ok, ok ? `all ${zones.length} tables sit in the ${zoneLabel(zones[0])}` : `tables were split across ${[...new Set(zones)].map(zoneLabel).join(" and ")}`, majority / zones.length);
+  },
+  tablesAdjacent(state, party, expected) {
+    const group = (party.request?.groupPartyIds || [party.id]).map((id) => seatedTable(state, id));
+    const tables = group.map((entry) => entry.table).filter(Boolean);
+    if (tables.length < group.length) return verdict(false, "not every linked table was seated", tables.length / group.length * 0.5);
+    const withNeighbor = tables.filter((table) => tables.some((other) => tablesAdjacent(table, other)));
+    const ok = tables.length < 2 || withNeighbor.length === tables.length;
+    return verdict(ok, ok ? `${tables.map((table) => table.id).join(", ")} sit side by side` : `${tables.length - withNeighbor.length} of ${tables.length} tables had no linked neighbor`, withNeighbor.length / tables.length);
+  },
+  capacityAtLeastIfConfirmed(state, party, seats, { table }) {
+    const confirmed = party.requestTrace.confirmedSize;
+    if (!table) return verdict(false, "never seated");
+    if (confirmed == null || confirmed < seats) return verdict(true, `final size was ${party.size}; ${table.id} fits`);
+    const ok = table.seats >= seats;
+    return verdict(ok, ok ? `they grew to ${confirmed} and ${table.id} seats ${table.seats}` : `they grew to ${confirmed} but ${table.id} only seats ${table.seats}`);
+  },
+  flexibilityHeldUntil(state, party, until, { ground }) {
+    const seatsHeld = party.requestTrace.heldTableSeatsAtConfirm;
+    const needed = ground.capacityAtLeastIfConfirmed ?? party.size;
+    if (party.requestTrace.confirmedSize == null) return verdict(false, `the ${minutesToTime(until)} confirmation never arrived`);
+    const ok = seatsHeld == null || seatsHeld >= needed;
+    return verdict(ok, ok ? `no undersized table was committed before ${minutesToTime(until)}` : `a ${seatsHeld}-seat table was committed before the ${minutesToTime(until)} confirmation`);
+  },
+  seatedBy(state, party, minute, { record }) {
+    if (!record) return verdict(false, "never seated");
+    const late = record.minute - minute;
+    const ok = late <= 0;
+    return verdict(ok, ok ? `seated at ${minutesToTime(record.minute)}, in time` : `seated at ${minutesToTime(record.minute)}, ${late} min after the ${minutesToTime(minute)} target`, ok ? 1 : clamp(1 - late / 30));
+  },
+  markedRush(state, party, expected) {
+    const ok = party.marks.rush === expected;
+    return verdict(ok, ok ? "flagged as a rush so the kitchen could pace the table" : "never flagged as a rush");
+  },
+  ifSeatedAfter(state, party, cutoff, { record }) {
+    if (!record) return verdict(false, "never seated");
+    return verdict(true, record.minute < cutoff ? `seated before the ${minutesToTime(cutoff)} cutoff` : `seated after the ${minutesToTime(cutoff)} cutoff, so the zone rule applied`);
+  },
+  acceptableOutcomes(state, party, outcomes, { ground }) {
+    const regular = seatedTable(state, ground.regularPartyId);
+    const anniversary = seatedTable(state, ground.anniversaryPartyId);
+    const anniversaryParty = getParty(state, ground.anniversaryPartyId);
+    if (!regular.table) return verdict(false, "the regular was never seated");
+    if (anniversaryParty?.status === "no_show") return verdict(true, `${anniversaryParty.name} never came; ${regular.table.id} for the regular stands`);
+    if (!anniversary.table) return verdict(false, `${anniversaryParty?.name || "the anniversary party"} was never seated`, 0.5);
+    const matches = (outcome) => (
+      (outcome.regularTable == null || regular.table.id === outcome.regularTable)
+      && (outcome.regularZone == null || regular.table.zone === outcome.regularZone)
+      && (outcome.anniversaryTable == null || anniversary.table.id === outcome.anniversaryTable)
+      && (outcome.anniversaryZone == null || anniversary.table.zone === outcome.anniversaryZone)
+    );
+    const ok = outcomes.some(matches);
+    return verdict(ok, `regular at ${regular.table.id}, anniversary at ${anniversary.table.id}${ok ? " — an acceptable call" : " — neither claim was honored well"}`);
+  },
+  requiresReason(state, party, expected, { record }) {
+    if (!record) return verdict(false, "never seated");
+    const ok = Boolean(record.reasonSupplied);
+    return verdict(ok, ok ? `decision explained: “${record.assignmentReason}”` : "no explanation was given for the call");
+  },
+  markedAllergy(state, party, expected) {
+    const ok = party.marks.allergy === expected;
+    return verdict(ok, ok ? "allergy flagged for the servers" : "allergy was never flagged for the servers");
+  },
+  noVisibleFlag(state, party, expected) {
+    const visible = ["rush", "allergy"].filter((key) => party.marks[key]);
+    const ok = visible.length === 0;
+    return verdict(ok, ok ? "no floor-visible flag gave them away" : `a visible ${visible.join(" and ")} flag made it obvious`);
+  },
+  reservationPriorityRespected(state, party) {
+    const bypassed = state.seatingRecords.filter((record) => record.partyId === party.id && record.priorityBypassed && record.source !== "host");
+    const ok = bypassed.length === 0;
+    const blocked = party.requestTrace.blockedAttempts;
+    return verdict(ok, `${ok ? "the queue held" : "they jumped the queue"}${blocked ? `; the engine blocked ${blocked} premature seating attempt${blocked === 1 ? "" : "s"}` : ""}`);
+  }
+};
+
+const REQUEST_META_KEYS = new Set(["regularPartyId", "anniversaryPartyId"]);
+
+export function gradeRequest(state, party) {
+  const request = party?.request;
+  if (!request) return null;
+  if (!request.ground) return { gradable: false, satisfied: null, partial: null, reasons: ["Host note · not graded"], checks: [] };
+  const { record, table } = seatedTable(state, party.id);
+  const context = { record, table, ground: request.ground };
+  const checks = Object.entries(request.ground)
+    .filter(([key]) => REQUEST_PREDICATES[key] && !REQUEST_META_KEYS.has(key))
+    .map(([key, value]) => ({ key, ...REQUEST_PREDICATES[key](state, party, value, context) }));
+  const partial = checks.length ? checks.reduce((total, check) => total + check.partial, 0) / checks.length : 0;
+  return {
+    gradable: true,
+    satisfied: checks.length > 0 && checks.every((check) => check.ok),
+    partial: Math.round(partial * 100) / 100,
+    reasons: checks.map((check) => check.reason),
+    checks
+  };
+}
+
+export function gradeSectionRequest(state, request) {
+  const ground = request?.ground;
+  if (!ground) return { gradable: false, satisfied: null, partial: null, reasons: ["Host note · not graded"], records: [] };
+  const records = state.seatingRecords.filter((record) => (
+    record.minute >= ground.from && record.minute < ground.until && getTable(state, record.tableId)?.zone === ground.sectionZone
+  ));
+  const violations = records.filter((record) => {
+    const party = getParty(state, record.partyId);
+    const allergy = Boolean(party?.marks.allergy || party?.request?.ground?.markedAllergy);
+    return record.size > ground.maxPartySize || (ground.noAllergyParties && allergy);
+  });
+  const satisfied = violations.length === 0;
+  const reasons = [
+    records.length
+      ? `${records.length} ${records.length === 1 ? "party" : "parties"} seated in the ${zoneLabel(ground.sectionZone)} between ${minutesToTime(ground.from)} and ${minutesToTime(ground.until)}`
+      : `no party was seated in the ${zoneLabel(ground.sectionZone)} during the window`,
+    ...(violations.length ? [`${violations.length} broke the rule: ${violations.map((record) => `${getParty(state, record.partyId)?.name || record.partyId} (${record.size}) at ${record.tableId}`).join(", ")}`] : [])
+  ];
+  return {
+    gradable: true,
+    satisfied,
+    partial: records.length ? Math.round((1 - violations.length / records.length) * 100) / 100 : 1,
+    reasons,
+    records
+  };
+}
+
+const ownerLabel = (origin) => (origin ? (origin.kind === "host" ? "HOST" : "AI") : null);
+
+function requestStatus(state, party) {
+  const record = latestSeatingRecord(state, party.id);
+  if (record) return { status: "addressed", addressedBy: ownerLabel(record.assignmentOrigin) };
+  if (["no_show", "left"].includes(party.status)) return { status: "failed", addressedBy: null };
+  return { status: "open", addressedBy: null };
+}
+
+function sectionRequestOwner(state, request) {
+  const graded = gradeSectionRequest(state, request);
+  const owners = graded.records.map((record) => ownerLabel(record.assignmentOrigin)).filter(Boolean);
+  if (!owners.length) return null;
+  const counts = owners.reduce((totals, owner) => ({ ...totals, [owner]: (totals[owner] || 0) + 1 }), {});
+  return Object.entries(counts).sort((left, right) => right[1] - left[1])[0][0];
+}
+
+export function listOpenRequests(state) {
+  const partyRequests = state.parties
+    .filter((party) => party.request)
+    .map((party) => ({
+      partyId: party.id,
+      partyName: party.name,
+      scope: "party",
+      category: party.request.category || null,
+      text: party.request.text,
+      source: party.request.source,
+      arrivesAt: party.source === "reservation" ? party.reservedFor : party.arrivedAt,
+      ...requestStatus(state, party)
+    }));
+  const sectionRequests = state.sectionRequests.map((request) => ({
+    partyId: null,
+    partyName: null,
+    scope: "section",
+    category: request.category || null,
+    zone: request.zone,
+    text: request.text,
+    source: request.source,
+    arrivesAt: request.ground?.from ?? null,
+    status: state.now >= (request.ground?.until ?? SERVICE_END) ? "addressed" : "open",
+    addressedBy: state.now >= (request.ground?.until ?? SERVICE_END) ? sectionRequestOwner(state, request) : null
+  }));
+  return [...partyRequests, ...sectionRequests].sort((left, right) => (left.arrivesAt ?? Infinity) - (right.arrivesAt ?? Infinity));
+}
+
+export function getRequestOutcomes(state) {
+  const partyOutcomes = state.parties
+    .filter((party) => party.request)
+    .map((party) => {
+      const grade = gradeRequest(state, party);
+      const record = latestSeatingRecord(state, party.id);
+      return {
+        partyId: party.id,
+        partyName: party.name,
+        scope: "party",
+        category: party.request.category || null,
+        categoryLabel: REQUEST_CATEGORY_LABELS[party.request.category] || null,
+        template: party.request.template || null,
+        text: party.request.text,
+        source: party.request.source,
+        owner: ownerLabel(record?.assignmentOrigin),
+        tableId: record?.tableId || null,
+        reason: record?.assignmentReason || null,
+        ...grade
+      };
+    });
+  const sectionOutcomes = state.sectionRequests.map((request) => ({
+    partyId: null,
+    partyName: null,
+    scope: "section",
+    category: request.category || null,
+    categoryLabel: REQUEST_CATEGORY_LABELS[request.category] || null,
+    template: request.template || null,
+    text: request.text,
+    source: request.source,
+    owner: sectionRequestOwner(state, request),
+    tableId: null,
+    reason: null,
+    ...gradeSectionRequest(state, request)
+  }));
+  return [...partyOutcomes, ...sectionOutcomes];
+}
+
 function nextRecommendedActions(state) {
   if (state.now >= SERVICE_END) return ["Review the service recap", "Start a new random run"];
   const waitingReservation = state.parties.find((party) => party.source === "reservation" && party.status === "waiting" && !party.committedTableId);
+  const upcomingRequests = listOpenRequests(state)
+    .filter((request) => request.status === "open" && request.partyId && request.arrivesAt != null && request.arrivesAt <= state.now + AGENT_PLANNING_HORIZON_MINUTES)
+    .filter((request) => !getParty(state, request.partyId)?.committedTableId && !getParty(state, request.partyId)?.candidateTableIds.length)
+    .slice(0, 2)
+    .map((request) => `Special request from ${request.partyName} (${minutesToTime(request.arrivesAt)}): “${request.text.length > 90 ? `${request.text.slice(0, 87)}…` : request.text}”`);
   if (state.controllerMode === "manual") {
-    return waitingReservation
-      ? [`Seat reservation ${waitingReservation.name} before a walk-in`, "Drag the party row to a legal table or select party then table"]
-      : ["Assign each arrived party manually", "Quote a wait when no legal table is ready"];
+    return [
+      ...(waitingReservation
+        ? [`Seat reservation ${waitingReservation.name} before a walk-in`, "Drag the party row to a legal table or select party then table"]
+        : ["Assign each arrived party manually", "Quote a wait when no legal table is ready"]),
+      ...upcomingRequests
+    ];
   }
-  if (state.controllerMode === "external" && state.agentReview.status === "review_due") {
-    return ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason", "Explain the current whole-floor plan"];
-  }
-  return ["Keep tentative tables current for parties inside the 45-minute horizon", "Re-read get_floor after every write"];
+  const base = state.agentReview.status === "review_due"
+    ? ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason that says how the plan honors any special request", "Explain the current whole-floor plan"]
+    : ["Keep tentative tables current for parties inside the 45-minute horizon", "Re-read get_floor after every write"];
+  return [...upcomingRequests, ...base];
 }
 
 export function getFloorSnapshot(state) {
@@ -1179,6 +1588,23 @@ export function getFloorSnapshot(state) {
     tableUnitCount: state.tables.length,
     kitchenDelay: Boolean(state.kitchenDelayUntil && state.now < state.kitchenDelayUntil),
     serviceBrief: clone(state.serviceBrief),
+    sectionRequests: state.sectionRequests.map((request) => ({
+      id: request.id,
+      scope: "section",
+      zone: request.zone,
+      server: SERVER_SECTIONS[request.zone]?.server || null,
+      text: request.text,
+      source: request.source
+    })),
+    geometry: {
+      columns: FLOOR_GRID.columns,
+      rows: FLOOR_GRID.rows,
+      entrance: { ...ENTRANCE },
+      adjacencyRule: ADJACENCY_RULE,
+      distanceRule: DISTANCE_RULE,
+      nearEntranceMaxDistance: NEAR_ENTRANCE_MAX_DISTANCE,
+      sections: Object.fromEntries(Object.entries(SERVER_SECTIONS).map(([zone, section]) => [zone, { ...section }]))
+    },
     nextRecommendedActions: nextRecommendedActions(state),
     weights: clone(state.weights),
     tables: state.tables.map((table) => ({
@@ -1187,6 +1613,9 @@ export function getFloorSnapshot(state) {
       minSeats: table.minSeats,
       shape: table.shape,
       zone: table.zone,
+      server: SERVER_SECTIONS[table.zone]?.server || null,
+      layout: { ...table.layout },
+      distanceToEntrance: distanceToEntrance(table),
       quiet: table.quiet,
       nearKitchen: table.nearKitchen,
       highChair: table.highChair,
@@ -1201,6 +1630,9 @@ export function getFloorSnapshot(state) {
       dirtyUntil: table.status === "dirty" ? table.dirtyUntil : null,
       assignmentOrigin: table.status === "seated" ? clone(table.assignmentOrigin) : null,
       assignmentReason: table.status === "seated" ? table.assignmentReason : null,
+      partyMarks: table.status === "seated" && table.partyId
+        ? { rush: Boolean(getParty(state, table.partyId)?.marks.rush), allergy: Boolean(getParty(state, table.partyId)?.marks.allergy) }
+        : null,
       likelyFree: table.status === "seated" && table.dueAt
         ? { earliest: table.dueAt + TABLE_RESET_MINUTES, latest: table.dueAt + TABLE_RESET_MINUTES }
         : table.status === "dirty" && table.dirtyUntil
@@ -1221,6 +1653,8 @@ export function getQueueSnapshot(state) {
       hostMayOverride: true
     },
     serviceBrief: clone(state.serviceBrief),
+    requestPolicy: "Special requests are natural language written by guests or the host. Interpret intent; the floor grades outcomes at 10 PM. Say how your plan honors a request in `reason`.",
+    openRequests: listOpenRequests(state),
     nextRecommendedActions: nextRecommendedActions(state),
     reservations: state.parties.filter((party) => party.source === "reservation" && ["upcoming", "waiting"].includes(party.status)).map(queueParty(state)),
     walkIns: state.parties.filter((party) => party.source === "walk_in" && party.status === "waiting").map(queueParty(state))
@@ -1245,6 +1679,10 @@ function queueParty(state) {
     children: party.children,
     needsAccessible: party.needsAccessible,
     isRegular: party.isRegular,
+    notes: party.notes || "",
+    request: party.request ? { text: party.request.text, source: party.request.source } : null,
+    linkedPartyIds: [...party.linkedPartyIds],
+    marks: clone(party.marks),
     quotedWaitMin: party.quotedWaitMin,
     candidateTableIds: [...party.candidateTableIds],
     autoAssignAt: party.autoAssignAt,

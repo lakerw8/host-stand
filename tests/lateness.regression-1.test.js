@@ -15,7 +15,7 @@ test("random reservations use only 0, 10, or 20-minute lateness and fixed no-sho
     const reservations = scenario.parties.filter((party) => party.source === "reservation");
 
     for (const party of reservations) {
-      const event = scenario.events.find((candidate) => candidate.partyIds?.includes(party.id));
+      const event = scenario.events.find((candidate) => ["arrival", "no_show"].includes(candidate.type) && candidate.partyIds?.includes(party.id));
       assert.ok(event, `missing event for ${party.id}`);
 
       if (event.type === "arrival") {

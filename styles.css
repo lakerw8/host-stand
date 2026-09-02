@@ -1336,6 +1336,62 @@ svg {
   background: transparent;
 }
 
+.request-note {
+  align-items: baseline;
+  color: var(--color-ink-2);
+  display: flex;
+  font-size: var(--text-xs);
+  gap: var(--space-xs);
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.request-note > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-badge {
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-xs);
+  color: var(--color-ink);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: var(--space-3xs) var(--space-2xs);
+}
+
+.request-badge--host {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.inspector__request {
+  border-inline-start: 2px solid var(--color-warning);
+  color: var(--color-ink-2);
+  display: grid;
+  font-size: var(--text-sm);
+  gap: var(--space-3xs);
+  padding-inline-start: var(--space-xs);
+}
+
+.inspector__request small {
+  color: var(--color-neutral);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.service-brief span.service-brief__request {
+  border-inline-start-color: var(--color-warning);
+  color: var(--color-ink-2);
+}
+
 .candidate-list {
   min-height: 1.75rem;
 }
