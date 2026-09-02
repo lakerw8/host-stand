@@ -100,7 +100,7 @@ function serviceBriefLabel(directive) {
 
 function sectionRequestLabel(request) {
   const words = request.text.split(" ");
-  return `Host note · ${escapeHtml(words.slice(0, 5).join(" "))}${words.length > 5 ? "…" : ""}`;
+  return `Note · ${escapeHtml(words.slice(0, 6).join(" "))}${words.length > 6 ? "…" : ""}`;
 }
 
 function renderServiceBrief() {
@@ -108,7 +108,7 @@ function renderServiceBrief() {
   const sectionRequests = state.sectionRequests || [];
   return `
     <div class="service-brief" aria-label="Tonight’s seating brief">
-      <strong>Service brief</strong>
+      <strong>Brief</strong>
       ${directives.map((directive) => `<span title="${escapeHtml(directive.text)}">${escapeHtml(serviceBriefLabel(directive))}</span>`).join("")}
       ${sectionRequests.map((request) => `<span class="service-brief__request" title="${escapeHtml(request.text)}">${sectionRequestLabel(request)}</span>`).join("")}
     </div>
@@ -255,7 +255,7 @@ function agentReviewPresentation() {
     tone: due ? "due" : "planned",
     meta: due
       ? "Waiting for the attached agent to re-read the floor"
-      : `${state.agentReview.plannedPartyCount} tentative · whole-night plan · T−${AGENT_FREEZE_WINDOW_MINUTES} lock`
+      : `${state.agentReview.plannedPartyCount} tentative ${state.agentReview.plannedPartyCount === 1 ? "plan" : "plans"}`
   };
 }
 

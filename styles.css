@@ -2303,7 +2303,7 @@ svg {
   border-block-end: var(--rule-strong);
   display: grid;
   gap: var(--space-sm);
-  padding: var(--space-sm) clamp(var(--space-md), 3vw, var(--space-xl));
+  padding: var(--space-2xs) clamp(var(--space-md), 3vw, var(--space-xl));
 }
 
 .product-bar .brand-lockup h1 {
@@ -2732,13 +2732,16 @@ svg {
 .service-brief span {
   border-inline-start: var(--rule-hairline);
   color: var(--color-neutral);
-  max-width: 17rem;
+  flex: 0 1 auto;
+  max-width: 22rem;
+  min-width: 4rem;
   overflow: hidden;
   padding-inline-start: var(--space-xs);
   text-overflow: ellipsis;
 }
 
 .product-bar .agent-strip__content {
+  gap: var(--space-3xs);
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -3299,16 +3302,17 @@ svg {
 
 @media (min-width: 40rem) {
   .product-bar .agent-strip__content {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .product-bar .agent-strip__content > p {
-    grid-column: 1 / -1;
+    grid-column: 1;
   }
 
   .product-bar .service-brief {
-    grid-column: auto;
-    justify-content: end;
+    flex-wrap: nowrap;
+    grid-column: 1;
+    justify-content: start;
   }
 
   .service-brief span:last-child {
