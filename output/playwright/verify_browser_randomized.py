@@ -363,6 +363,14 @@ def main():
         dismiss_feedback = page.locator('[data-action="dismiss-feedback"]')
         if dismiss_feedback.count():
             dismiss_feedback.click()
+        # Let the assignment-flight animation finish and bring a request card into view for the README hero.
+        page.wait_for_timeout(700)
+        page.evaluate("""() => {
+          const rail = document.querySelector('.queue-rail');
+          const card = [...rail.querySelectorAll('.party-row')].find(row => row.querySelector('.request-note'));
+          if (card) rail.scrollTop = Math.max(0, card.offsetTop - rail.offsetTop - 8);
+        }""")
+        page.wait_for_timeout(100)
         page.screenshot(path=str(OUTPUT / "external-ai-assignment.png"), full_page=True)
         results.append("external AI assignments show the named agent and its reason on the floor, and its plans carry Accept and Reject")
 
