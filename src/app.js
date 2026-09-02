@@ -105,20 +105,101 @@ function renderServiceBrief() {
 }
 
 
+const formatMinutes = (value) => (value == null ? "—" : `${Math.round(value)} min`);
+const formatCount = (value) => (value == null ? "—" : String(value));
+
+function recapRequestFraction(column) {
+  if (!column.present) return "No agent attached";
+  return column.specialRequests.total ? `${column.specialRequests.satisfied} / ${column.specialRequests.total}` : "0 / 0";
+}
+
+function renderRecapComparison(recap) {
+  const { host, agent } = recap.comparison;
+  const cell = (column, value) => (column.present ? value : '<span class="recap-compare__absent">No agent attached</span>');
+  const rows = [
+    { label: "Guest satisfaction", host: formatPercent(host.guestSatisfaction), agent: cell(agent, formatPercent(agent.guestSatisfaction)) },
+    { label: "Walk-in P90 wait", host: formatMinutes(host.walkInP90), agent: cell(agent, formatMinutes(agent.walkInP90)) },
+    { label: "Table fit", host: formatPercent(host.tableFit), agent: cell(agent, formatPercent(agent.tableFit)) },
+    { label: "Decisions made", host: formatCount(host.decisions), agent: cell(agent, formatCount(agent.decisions)) },
+    { label: "Overrides of the other's plan", host: `${formatCount(host.overrides)} of AI plans`, agent: cell(agent, `${formatCount(agent.accepted)} accepted · ${formatCount(agent.rejected)} rejected · ${formatCount(agent.overridden)} overridden`) }
+  ];
+  return `
+    <table class="recap-compare" aria-label="Host decisions versus agent decisions">
+      <thead>
+        <tr><th scope="col">Metric</th><th scope="col">${escapeHtml(host.label)}</th><th scope="col">${escapeHtml(agent.label)}</th></tr>
+      </thead>
+      <tbody>
+        <tr class="recap-compare__headline">
+          <th scope="row">Special requests satisfied</th>
+          <td><strong>${escapeHtml(recapRequestFraction(host))}</strong></td>
+          <td><strong>${escapeHtml(recapRequestFraction(agent))}</strong></td>
+        </tr>
+        ${rows.map((row) => `<tr><th scope="row">${escapeHtml(row.label)}</th><td>${row.host}</td><td>${row.agent}</td></tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function recapOutcomeLabel(outcome) {
+  if (!outcome.gradable) return { tone: "note", text: "Host note · not graded" };
+  if (outcome.satisfied) return { tone: "ok", text: "Satisfied" };
+  if (!outcome.owner && outcome.scope === "party") return { tone: "fail", text: "Failed · never seated" };
+  return { tone: outcome.partial >= 0.5 ? "partial" : "fail", text: `Failed · ${Math.round((outcome.partial || 0) * 100)}% of the ask` };
+}
+
+function renderRecapRequests(recap) {
+  const outcomes = recap.requests.outcomes;
+  if (!outcomes.length) return '<p class="empty-state">This run had no special requests.</p>';
+  return `
+    <ol class="recap-requests" aria-label="Every special request and its outcome">
+      ${outcomes.map((outcome) => {
+        const label = recapOutcomeLabel(outcome);
+        const who = outcome.partyName ? escapeHtml(outcome.partyName) : `Section note${outcome.template ? "" : ""}`;
+        const owner = outcome.owner ? `<b class="recap-owner is-${outcome.owner === "HOST" ? "host" : "external"}">${outcome.owner}</b>` : '<b class="recap-owner is-none">—</b>';
+        return `
+          <li class="is-${label.tone}" ${outcome.partyId ? `data-party-id="${escapeHtml(outcome.partyId)}"` : ""}>
+            <div class="recap-requests__head">
+              <span class="recap-requests__who">${who}${outcome.tableId ? ` · ${escapeHtml(outcome.tableId)}` : ""}${outcome.categoryLabel ? ` · ${escapeHtml(outcome.categoryLabel)}` : ""}</span>
+              ${owner}
+              <span class="recap-requests__verdict">${escapeHtml(label.text)}</span>
+            </div>
+            <p class="recap-requests__text">“${escapeHtml(outcome.text)}”</p>
+            ${outcome.reason ? `<p class="recap-requests__reason"><span>${outcome.owner === "HOST" ? "Host reason" : "Agent reason"}</span> ${escapeHtml(outcome.reason)}</p>` : ""}
+            ${outcome.gradable && outcome.reasons?.length ? `<p class="recap-requests__grade"><span>Floor</span> ${escapeHtml(outcome.reasons.join(" · "))}</p>` : ""}
+          </li>
+        `;
+      }).join("")}
+    </ol>
+  `;
+}
+
 function renderServiceRecap() {
   if (state.now < SERVICE_END) return "";
   const recap = getServiceRecap(state);
+  const headline = recap.requests.total
+    ? `${recap.requests.satisfied} of ${recap.requests.total} special requests satisfied`
+    : "No graded special requests this run";
   return `
     <dialog class="recap-dialog" id="service-recap" aria-labelledby="recap-title">
       <div class="recap-dialog__head">
         <div>
           <span class="command-kicker">SERVICE COMPLETE · ${escapeHtml(state.runCode)}</span>
-          <h2 id="recap-title">How the floor performed</h2>
-          <p>Host and agent decisions, graded on the same floor.</p>
+          <h2 id="recap-title">Host vs. Agent</h2>
+          <p>${escapeHtml(headline)} · same floor, same night. The engine enforced; whoever seated the party owns the outcome.</p>
         </div>
-        <div class="recap-grade" aria-label="Grade ${recap.grade}, ${recap.score} out of 100"><strong>${recap.grade}</strong><span>${recap.score}/100</span></div>
+        <div class="recap-grade" aria-label="Grade ${recap.grade}, ${recap.score} out of 100"><strong>${recap.grade}</strong><span>${recap.score}/100 whole night</span></div>
       </div>
-      <div class="recap-components" aria-label="Score components">
+      ${renderRecapComparison(recap)}
+      <div class="recap-guard" role="status">
+        <span>Reservation priority violations: <strong>${recap.reservationPriorityViolations}</strong></span>
+        <span>${recap.hostPriorityOverrides ? `Host overrode reservation priority ${recap.hostPriorityOverrides} time${recap.hostPriorityOverrides === 1 ? "" : "s"} by dragging` : "No host override of reservation priority"}</span>
+        <span>${recap.partiesServed}/${recap.eligibleParties} parties seated · ${recap.coversServed} covers</span>
+      </div>
+      <section class="recap-section">
+        <h3>Every special request</h3>
+        ${renderRecapRequests(recap)}
+      </section>
+      <div class="recap-components" aria-label="Whole-night score components">
         ${recap.components.map((component) => `
           <div>
             <span>${escapeHtml(component.label)}</span>
@@ -131,7 +212,6 @@ function renderServiceRecap() {
       <div class="recap-details">
         <section>
           <h3>Decision ownership</h3>
-          <p>${recap.partiesServed}/${recap.eligibleParties} parties seated · ${recap.coversServed} covers</p>
           <ul>${recap.provenance.length ? recap.provenance.map((origin) => `<li><strong>${escapeHtml(origin.label)}</strong><span>${origin.assignments} assignments · ${origin.covers} covers</span></li>`).join("") : "<li>No assignments recorded</li>"}</ul>
         </section>
         <section>
@@ -139,7 +219,7 @@ function renderServiceRecap() {
           <ul>${recap.briefResults.map((result) => `<li><strong>${Math.round(result.value * 100)}%</strong><span>${escapeHtml(result.result)}</span></li>`).join("")}</ul>
         </section>
       </div>
-      <p class="recap-formula">Demo score—not an OpenAI judging score. ${escapeHtml(recap.formula)}.</p>
+      <p class="recap-formula">This is a transparent demo metric, not an OpenAI judging score. Whole-night score: ${escapeHtml(recap.formula)}.</p>
       <div class="recap-actions">
         <button class="control control--quiet" type="button" data-action="close-recap">Return to floor</button>
         <button class="control recap-actions__primary" type="button" data-action="reset-night">Start a new random run</button>

@@ -116,6 +116,8 @@ export function createInitialState(options = {}) {
     disruptions: [],
     floorVersion: 0,
     changeLog: [],
+    hostDecisions: [],
+    agentEverAttached: false,
     scenarioSeed: scenario.seed,
     runCode: scenario.runCode,
     preferenceSeed: scenario.seed,
@@ -568,6 +570,25 @@ function seatPartyAtTable(state, party, table, source, options = {}) {
   state.plan = `${assignmentOrigin.label} seated ${party.name} at ${table.id}. ${assignmentReason}`;
 }
 
+function recordHostDecision(state, party, action, tableId, options = {}) {
+  state.hostDecisions.push({
+    partyId: party.id,
+    partyName: party.name,
+    action,
+    tableId,
+    previousTableId: options.previousTableId ?? null,
+    reason: options.reason || null,
+    at: state.now
+  });
+  if (state.hostDecisions.length > 200) state.hostDecisions = state.hostDecisions.slice(-200);
+}
+
+function noteHostDecisionOnAgentPlan(state, party, tableId, options = {}) {
+  if (options.source !== "host" || party.candidateState !== "tentative" || !party.candidateTableIds.length) return;
+  const agentTop = party.candidateTableIds[0];
+  recordHostDecision(state, party, agentTop === tableId ? "accepted" : "overrode", tableId, { previousTableId: agentTop, reason: options.reason });
+}
+
 export function assignTable(state, partyId, tableId, options = {}) {
   const source = options.source || "host";
   const party = getParty(state, partyId);
@@ -579,6 +600,7 @@ export function assignTable(state, partyId, tableId, options = {}) {
   }
   if (!party || !table) return failure(state, "NOT_FOUND", "Party or table was not found.");
   if (party.status === "seated") return failure(state, "ALREADY_SEATED", `${party.name} is already seated; use move_party.`);
+  noteHostDecisionOnAgentPlan(state, party, tableId, { source, reason: options.reason });
   const priorityBlocker = source === "host" ? null : getReservationPriorityBlocker(state, party);
   if (priorityBlocker) {
     party.requestTrace.blockedAttempts += 1;
@@ -718,6 +740,7 @@ export function setHostCandidateOverride(state, partyId, tableId) {
   }
   const legality = checkAssignmentLegality(state, partyId, tableId, { forCandidate: true, allowUpcoming: true, source: "host" });
   if (!legality.legal) return failure(state, "ILLEGAL_CANDIDATE", legality.reasons[0], { reasons: legality.reasons });
+  noteHostDecisionOnAgentPlan(state, party, tableId, { source: "host" });
   party.hostOverrideTableId = tableId;
   const candidates = [tableId, ...party.candidateTableIds.filter((candidateId) => candidateId !== tableId)].slice(0, 3);
   const result = setCandidates(state, partyId, candidates, null, { source: "host" });
@@ -1172,6 +1195,7 @@ export function attachExternalAgent(state, name, mode = "autonomous") {
   if (!cleanName) return failure(state, "INVALID_AGENT", "Provide a short agent name.");
   if (!["advisory", "autonomous"].includes(mode)) return failure(state, "INVALID_AGENT_MODE", "Agent mode must be advisory or autonomous.");
   state.controllerMode = "external";
+  state.agentEverAttached = true;
   state.agentConnection = { name: cleanName, mode, attachedAt: state.now, lastSeenAt: state.now };
   for (const party of state.parties) {
     if (party.hostOverrideTableId) {
@@ -1338,6 +1362,35 @@ export function getServiceRecap(state) {
     provenance.set(origin.kind, current);
   }
 
+  const requestOutcomes = getRequestOutcomes(state);
+  const average = (values) => (values.length ? values.reduce((total, value) => total + value, 0) / values.length : null);
+  const ownerColumn = (kind, owner, label) => {
+    const ownerRecords = records.filter((record) => record.assignmentOrigin?.kind === kind);
+    const graded = requestOutcomes.filter((outcome) => outcome.owner === owner && outcome.gradable);
+    const decisions = state.hostDecisions;
+    return {
+      kind,
+      owner,
+      label,
+      present: kind === "host" ? true : state.agentEverAttached,
+      specialRequests: {
+        satisfied: graded.filter((outcome) => outcome.satisfied).length,
+        total: graded.length,
+        partial: average(graded.map((outcome) => outcome.partial))
+      },
+      guestSatisfaction: average(ownerRecords.map((record) => record.sat)),
+      walkInP90: percentile(ownerRecords.filter((record) => getParty(state, record.partyId)?.source === "walk_in").map((record) => record.wait), 0.9),
+      tableFit: average(ownerRecords.map((record) => record.turn)),
+      decisions: ownerRecords.length,
+      covers: ownerRecords.reduce((total, record) => total + record.size, 0),
+      overrides: kind === "host" ? decisions.filter((decision) => decision.action === "overrode").length : null,
+      accepted: kind === "external" ? decisions.filter((decision) => decision.action === "accepted").length : null,
+      rejected: kind === "external" ? decisions.filter((decision) => decision.action === "rejected").length : null,
+      overridden: kind === "external" ? decisions.filter((decision) => decision.action === "overrode").length : null
+    };
+  };
+  const gradedOutcomes = requestOutcomes.filter((outcome) => outcome.gradable);
+
   return {
     official: false,
     status: state.now >= SERVICE_END ? "complete" : "provisional",
@@ -1356,7 +1409,20 @@ export function getServiceRecap(state) {
     eligibleParties: eligiblePartyCount,
     coversServed: records.reduce((total, record) => total + record.size, 0),
     provenance: [...provenance.values()],
-    briefResults: brief.results
+    briefResults: brief.results,
+    comparison: {
+      host: ownerColumn("host", "HOST", "Host decisions"),
+      agent: ownerColumn("external", "AI", state.agentConnection?.name ? `${state.agentConnection.name} decisions` : "Agent decisions")
+    },
+    requests: {
+      total: gradedOutcomes.length,
+      satisfied: gradedOutcomes.filter((outcome) => outcome.satisfied).length,
+      unattributed: gradedOutcomes.filter((outcome) => !outcome.owner).length,
+      outcomes: requestOutcomes
+    },
+    reservationPriorityViolations: state.seatingRecords.filter((record) => record.priorityBypassed && record.source !== "host").length,
+    hostPriorityOverrides: state.seatingRecords.filter((record) => record.priorityBypassed && record.source === "host").length,
+    agentEverAttached: state.agentEverAttached
   };
 }
 
@@ -1623,11 +1689,15 @@ export function listOpenRequests(state) {
   return [...partyRequests, ...sectionRequests].sort((left, right) => (left.arrivesAt ?? Infinity) - (right.arrivesAt ?? Infinity));
 }
 
+// Outcomes are exposed in the 10 PM recap, so they carry plain-language reasons
+// only; predicate keys never leave the engine.
+const publicGrade = ({ checks, records, ...grade }) => grade;
+
 export function getRequestOutcomes(state) {
   const partyOutcomes = state.parties
     .filter((party) => party.request)
     .map((party) => {
-      const grade = gradeRequest(state, party);
+      const grade = publicGrade(gradeRequest(state, party));
       const record = latestSeatingRecord(state, party.id);
       return {
         partyId: party.id,
@@ -1656,7 +1726,7 @@ export function getRequestOutcomes(state) {
     owner: sectionRequestOwner(state, request),
     tableId: null,
     reason: null,
-    ...gradeSectionRequest(state, request)
+    ...publicGrade(gradeSectionRequest(state, request))
   }));
   return [...partyOutcomes, ...sectionOutcomes];
 }

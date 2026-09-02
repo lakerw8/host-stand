@@ -2856,6 +2856,197 @@ svg {
   font-size: var(--text-xs);
 }
 
+.recap-compare {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  width: 100%;
+}
+
+.recap-compare th,
+.recap-compare td {
+  border-block-end: var(--rule-hairline);
+  padding: var(--space-xs) var(--space-md);
+  text-align: start;
+  vertical-align: top;
+}
+
+.recap-compare thead th {
+  color: var(--color-neutral);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.recap-compare tbody th {
+  color: var(--color-ink-2);
+  font-weight: 500;
+}
+
+.recap-compare td {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.recap-compare__headline th,
+.recap-compare__headline td {
+  background: var(--color-accent-soft);
+  border-block-end: var(--rule-strong);
+}
+
+.recap-compare__headline th {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.recap-compare__headline strong {
+  color: var(--color-accent);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.recap-compare__absent {
+  color: var(--color-neutral);
+  font-style: italic;
+}
+
+.recap-guard {
+  border-block-end: var(--rule-strong);
+  color: var(--color-neutral);
+  display: flex;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  gap: var(--space-xs) var(--space-lg);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.recap-guard strong {
+  color: var(--color-success);
+}
+
+.recap-section {
+  border-block-end: var(--rule-strong);
+  padding: var(--space-md);
+}
+
+.recap-section h3 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  margin: 0 0 var(--space-xs);
+}
+
+.recap-requests {
+  display: grid;
+  gap: var(--space-xs);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recap-requests li {
+  border: var(--rule-hairline);
+  border-inline-start: 3px solid var(--color-rule-2);
+  border-radius: var(--radius-xs);
+  display: grid;
+  gap: var(--space-3xs);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.recap-requests li.is-ok {
+  border-inline-start-color: var(--color-success);
+}
+
+.recap-requests li.is-partial {
+  border-inline-start-color: var(--color-warning);
+}
+
+.recap-requests li.is-fail {
+  border-inline-start-color: var(--color-error);
+}
+
+.recap-requests__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.recap-requests__who {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.recap-requests__verdict {
+  color: var(--color-neutral);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin-inline-start: auto;
+}
+
+.recap-requests li.is-ok .recap-requests__verdict {
+  color: var(--color-success);
+}
+
+.recap-requests li.is-fail .recap-requests__verdict {
+  color: var(--color-error);
+}
+
+.recap-owner {
+  border: var(--rule-hairline);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: var(--space-3xs) var(--space-2xs);
+}
+
+.recap-owner.is-external {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+.recap-owner.is-host {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
+  color: var(--color-ink);
+}
+
+.recap-owner.is-none {
+  color: var(--color-neutral);
+}
+
+.recap-requests__text {
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.recap-requests__reason,
+.recap-requests__grade {
+  color: var(--color-neutral);
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+.recap-requests__reason span,
+.recap-requests__grade span {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  margin-inline-end: var(--space-2xs);
+}
+
 .recap-components {
   border-block-end: var(--rule-strong);
   display: grid;
