@@ -925,7 +925,7 @@ function render() {
   const planLabel = agentAttached ? state.agentConnection.name : "Manual host";
   const modeLabel = agentAttached ? `Agent: ${state.agentConnection.name}` : "Manual host";
   const planText = state.controllerMode === "manual"
-    ? "No agent yet. The engine enforces the rules; a browser agent makes the judgment calls. Press Start and drag arrivals onto tables, or press Connect AI."
+    ? "No agent yet. The engine enforces the rules, an agent makes the calls. Press Start and drag arrivals, or Connect AI."
     : state.plan;
   const hostGuidance = state.controllerMode === "manual"
     ? "Manual · seat arrivals by hand."
@@ -1027,7 +1027,7 @@ function render() {
         <div class="agent-strip" aria-label="Current agent plan">
           <div class="agent-orbit is-${escapeHtml(reviewPresentation.tone)}" aria-hidden="true"><span></span></div>
           <div class="agent-strip__content">
-            <p><strong>${escapeHtml(planLabel)}</strong> ${escapeHtml(planText)}</p>
+            <p title="${escapeHtml(planText)}"><strong>${escapeHtml(planLabel)}</strong> ${escapeHtml(planText)}</p>
             <div class="agent-review-meta" role="status" aria-live="polite">
               <strong>${escapeHtml(reviewPresentation.label)}</strong>
               ${reviewPresentation.meta ? `<span>${escapeHtml(reviewPresentation.meta)}</span>` : ""}
