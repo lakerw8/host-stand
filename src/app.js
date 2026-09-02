@@ -242,8 +242,8 @@ function renderServiceRecap() {
 function agentReviewPresentation() {
   if (state.controllerMode === "manual") {
     return {
-      label: "Manual assignment",
-      detail: "No automatic reviews",
+      label: "Manual mode",
+      detail: "No agent attached",
       tone: "manual",
       meta: ""
     };
@@ -800,8 +800,8 @@ function renderInspector(activeParty) {
     `;
   }
   const emptyInstruction = state.controllerMode === "manual"
-    ? "Manual assignment — arrived parties only. Drag row → table, or select party → table."
-    : "Override — upcoming locks a plan; arrived seats now. Drag, tap a chip, or select → table.";
+    ? "Seat an arrived party: drag it onto a table, or tap the party and then a table."
+    : "Tap Accept on a plan, or drag a party onto any legal table to override it.";
   return `
     <aside class="inspector inspector--empty" aria-label="Host assignment instructions">
       <span class="drag-key" aria-hidden="true">↗</span>
@@ -925,11 +925,11 @@ function render() {
   const planLabel = agentAttached ? state.agentConnection.name : "Manual host";
   const modeLabel = agentAttached ? `Agent: ${state.agentConnection.name}` : "Manual host";
   const planText = state.controllerMode === "manual"
-    ? "No agent is attached. Seat arrived parties by drag or select-then-table; the engine still enforces every hard rule."
+    ? "No agent attached yet. The engine enforces every rule; a browser agent makes the judgment calls. Press Start and seat arrivals by dragging, or press Connect AI to hand the night to an agent."
     : state.plan;
   const hostGuidance = state.controllerMode === "manual"
-    ? "Manual · arrived parties only."
-    : "AI plans · accept, reject, or drag to override.";
+    ? "Manual · seat arrivals by hand."
+    : "Agent plans · accept, reject, or drag to override.";
   const reviewPresentation = agentReviewPresentation();
   const queueCount = queueParties.length;
 
