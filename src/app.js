@@ -196,7 +196,7 @@ function renderServiceRecap() {
         <div>
           <span class="command-kicker">SERVICE COMPLETE · ${escapeHtml(state.runCode)}</span>
           <h2 id="recap-title">Host vs. Agent</h2>
-          <p>${escapeHtml(headline)} · same floor, same night. The engine enforced; whoever seated the party owns the outcome.</p>
+          <p>${escapeHtml(headline)}. Same floor, same night. Whoever seated the party owns the result.</p>
         </div>
         <div class="recap-grade" aria-label="Grade ${recap.grade}, ${recap.score} out of 100"><strong>${recap.grade}</strong><span>${recap.score}/100 whole night</span></div>
       </div>
@@ -861,7 +861,7 @@ function renderAgentConnector() {
       <div class="agent-connect-panel__copy">
         <span class="command-kicker">EXTERNAL AGENT</span>
         <strong>${connection ? `${escapeHtml(connection.name)} is attached` : "Attach through WebMCP"}</strong>
-        <p>${connection ? `${escapeHtml(connection.mode)} mode · connection stays attached across new random runs.` : `${capability} No API key is needed: the WebMCP-capable browser agent supplies the model. Open this deployed page there, paste the prompt, and watch its named decisions appear on the floor.`}</p>
+        <p>${connection ? `${escapeHtml(connection.mode)} mode · stays attached across new runs.` : `${capability} No API key needed: your browser agent brings the model. Open this page in it, paste the prompt, and its decisions show up on the floor under its own name.`}</p>
         <div class="controller-mode-guide" aria-label="Available operating modes">
           <span class="${state.controllerMode === "manual" ? "is-current" : ""}"><b>Manual host</b><small>The human seats every arrival</small></span>
           <span class="${state.controllerMode === "external" ? "is-current" : ""}"><b>Agent</b><small>A WebMCP browser agent plans and explains</small></span>

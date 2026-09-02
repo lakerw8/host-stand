@@ -274,7 +274,7 @@ def main():
         # Attach an agent: the header flips, upcoming reservations become override targets.
         page.locator(".agent-connect-control").click()
         assert "Attach through WebMCP" in page.locator(".agent-connect-panel").inner_text()
-        assert "No API key is needed" in page.locator(".agent-connect-panel").inner_text()
+        assert "No API key needed" in page.locator(".agent-connect-panel").inner_text()
         guide_text = page.locator(".controller-mode-guide").inner_text()
         assert "Manual host" in guide_text and "Agent" in guide_text and "Basic algo" not in guide_text
         attached = page.evaluate("async () => window.hostStandInvokeTool('attach_agent', {agent_name: 'WebMCP Agent', mode: 'autonomous'})")
