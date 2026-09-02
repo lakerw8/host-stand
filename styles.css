@@ -3427,16 +3427,14 @@ svg {
   }
 }
 
-/* The bar label takes the empty entrance cell above the counter column instead
-   of sitting rotated under it. */
+/* The bar runs along the left wall. Give the rotated label its own gutter so
+   the counter ovals no longer sit on top of it. */
 @media (min-width: 60rem) {
+  .floor-map {
+    padding-inline-start: 1.9rem;
+  }
+
   .zone-label--bar {
-    align-self: end;
-    grid-column: 1;
-    grid-row: 1;
-    justify-self: center;
-    padding-block-end: var(--space-3xs);
-    position: static;
-    transform: none;
+    inset-inline-start: var(--space-xs);
   }
 }
