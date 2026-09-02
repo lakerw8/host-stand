@@ -634,6 +634,21 @@ svg {
   animation: candidate-signal 1.2s var(--ease-in-out) infinite;
 }
 
+.product-bar .agent-review-meta span.mcp-status--strip {
+  color: var(--color-neutral);
+  display: none;
+}
+
+.product-bar .agent-review-meta span.mcp-status--strip > span {
+  display: inline-block;
+}
+
+@media (min-width: 60rem) {
+  .product-bar .agent-review-meta span.mcp-status--strip {
+    display: inline-flex;
+  }
+}
+
 .service-alert {
   align-items: center;
   background: var(--color-warning-soft);

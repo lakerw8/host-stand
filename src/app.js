@@ -37,7 +37,7 @@ let interactionHold = false;
 let paletteOpen = false;
 let agentPanelOpen = false;
 let simulationPanelOpen = false;
-let webmcpStatus = { supported: null, registered: 0, total: 20, failures: [] };
+let webmcpStatus = { supported: null, entryPoint: null, registered: 0, total: 20, failures: [] };
 let feedback = null;
 let carryMinutes = 0;
 let lastRealTick = performance.now();
@@ -143,7 +143,7 @@ function agentReviewPresentation() {
       label: "Manual assignment",
       detail: "No automatic reviews",
       tone: "manual",
-      meta: "The host assigns every arriving party"
+      meta: ""
     };
   }
   const due = state.agentReview.status === "review_due";
@@ -672,12 +672,24 @@ function renderActivity() {
   `;
 }
 
-function renderWebMCPBadge() {
-  if (state.agentConnection) return `<span class="mcp-status is-success"><span></span> ${escapeHtml(state.agentConnection.name)} attached</span>`;
-  if (webmcpStatus.supported == null) return '<span class="mcp-status is-loading"><span></span> Checking WebMCP</span>';
-  if (!webmcpStatus.supported) return `<span class="mcp-status"><span></span> ${webmcpStatus.total} tools · preview API</span>`;
-  if (webmcpStatus.failures.length) return `<span class="mcp-status is-error"><span></span> ${webmcpStatus.registered}/${webmcpStatus.total} tools</span>`;
-  return `<span class="mcp-status is-success"><span></span> ${webmcpStatus.registered} WebMCP tools live</span>`;
+function webmcpStatusText() {
+  if (webmcpStatus.supported == null) return { tone: "is-loading", text: "Checking WebMCP" };
+  if (!webmcpStatus.supported) return { tone: "", text: `WebMCP: ${webmcpStatus.total} tools · unavailable` };
+  const entry = webmcpStatus.entryPoint || "document";
+  if (webmcpStatus.failures.length) return { tone: "is-error", text: `WebMCP: ${webmcpStatus.registered}/${webmcpStatus.total} tools · ${entry}` };
+  return { tone: "is-success", text: `WebMCP: ${webmcpStatus.registered} tools · ${entry}` };
+}
+
+function renderWebMCPBadge(variant = "console") {
+  const status = webmcpStatusText();
+  const className = `mcp-status ${status.tone} ${variant === "strip" ? "mcp-status--strip" : ""}`.trim();
+  const title = webmcpStatus.supported
+    ? `Tools registered through ${webmcpStatus.entryPoint}.modelContext`
+    : "No modelContext API in this browser. Open the page in a WebMCP-capable browser agent, or inspect window.__HOST_STAND_TOOLS__.";
+  if (state.agentConnection && variant === "console") {
+    return `<span class="mcp-status is-success"><span></span> ${escapeHtml(state.agentConnection.name)} attached</span>`;
+  }
+  return `<span class="${className}" title="${escapeHtml(title)}" data-webmcp-entry="${escapeHtml(webmcpStatus.entryPoint || "unavailable")}"><span></span> ${escapeHtml(status.text)}</span>`;
 }
 
 function renderAgentConnector() {
@@ -853,7 +865,8 @@ function render() {
             <p><strong>${escapeHtml(planLabel)}</strong> ${escapeHtml(planText)}</p>
             <div class="agent-review-meta" role="status" aria-live="polite">
               <strong>${escapeHtml(reviewPresentation.label)}</strong>
-              <span>${escapeHtml(reviewPresentation.meta)}</span>
+              ${reviewPresentation.meta ? `<span>${escapeHtml(reviewPresentation.meta)}</span>` : ""}
+              ${renderWebMCPBadge("strip")}
             </div>
             ${renderServiceBrief()}
           </div>

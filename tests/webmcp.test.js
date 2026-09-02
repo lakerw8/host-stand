@@ -25,6 +25,7 @@ test("the WebMCP catalog is discoverable, unique, and uses current annotations",
   const { definitions } = createHarness();
   const names = definitions.map((tool) => tool.name);
   const readTools = new Set(["get_floor", "get_queue", "score_assignment"]);
+  const untrustedTools = new Set(["get_floor", "get_queue"]);
 
   assert.equal(definitions.length, 20);
   assert.equal(new Set(names).size, definitions.length);
@@ -37,7 +38,7 @@ test("the WebMCP catalog is discoverable, unique, and uses current annotations",
     assert.equal(tool.inputSchema.additionalProperties, false);
     assert.deepEqual(Object.keys(tool.annotations).sort(), ["readOnlyHint", "untrustedContentHint"]);
     assert.equal(tool.annotations.readOnlyHint, readTools.has(tool.name));
-    assert.equal(tool.annotations.untrustedContentHint, false);
+    assert.equal(tool.annotations.untrustedContentHint, untrustedTools.has(tool.name), `${tool.name} untrustedContentHint`);
     for (const required of tool.inputSchema.required || []) {
       assert.ok(required in tool.inputSchema.properties, `${tool.name}.${required} must have a schema`);
     }
