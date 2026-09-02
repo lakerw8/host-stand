@@ -1,6 +1,6 @@
 # WebMCP browser verification
 
-Records which browsers registered the Host Stand tools, through which entry point, and against which URL. Update the table before code freeze; the ChatGPT row and the production-URL rows must be filled in by hand on a machine with those browsers.
+Records which browsers registered the Host Stand tools, through which entry point, and against which URL. The judges test with ChatGPT's in-app browser (the ChatGPT desktop app's built-in browser, which replaced Atlas) or Chrome with `chrome://flags/#enable-webmcp-testing`. The interactive-Chrome row still needs a hand-filled entry from a machine with the flag enabled.
 
 | Date (PDT) | Browser | URL | Entry point | Tools registered | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -12,7 +12,7 @@ Records which browsers registered the Host Stand tools, through which entry poin
 | 2026-09-01 | Google Chrome 152.0.7977.65 (Playwright headless, polyfill on `navigator` only) | https://host-stand-nine.vercel.app (commit 106566a) | `navigator.modelContext` | 21 / 21 | Fallback pass against production; chip reads `WebMCP: 21 tools · navigator`. |
 | 2026-09-01 | Google Chrome 152.0.7977.65 (Playwright headless, no flag) | https://host-stand-nine.vercel.app/?run=DEMOAAFT | none | 0 / 21 | Demo night loads with 10 open requests; chip reads `· unavailable`; no console errors. |
 | _pending_ | Chrome (interactive) with `chrome://flags/#enable-webmcp-testing` | https://host-stand-nine.vercel.app | | | Load the page, confirm the chip reads `· document` (or `· navigator`) on load, then run the agent loop from **Connect AI**. Record the version string from `chrome://version`. |
-| _pending_ | ChatGPT in-app browser | https://host-stand-nine.vercel.app | | | Open the deployed URL inside ChatGPT, paste the **Connect AI** prompt, and confirm the header switches to **Agent: …**. Record the app version and the entry point shown in the chip. |
+| 2026-09-01 | ChatGPT desktop app 26.825.51511 for macOS (built-in browser, Codex chat, model GPT-5.6 Sol) | https://host-stand-nine.vercel.app/?run=DEMOAAFT (commit 106566a) | `document.modelContext` | 21 / 21 | The judges' surface: Atlas was retired and its browser moved into the ChatGPT desktop app. Opened via the side panel → **Browser**. Chip reads `WebMCP: 21 tools · document`. Prompting the chat to use the page's site tools produced `attach_agent` (agent "ChatGPT", advisory), `get_floor`, and `get_queue`; the header switched to **Agent: ChatGPT** and the agent reported runCode `DEMOAAFT`, floorVersion 1, controllerMode `external`. The address-bar page-info popover in this build shows only "Connection is secure" and "Site settings"; there was no separate "Site tools" entry to inspect. |
 
 ## How to reproduce the automated rows
 
