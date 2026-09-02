@@ -83,7 +83,7 @@ def main():
         page.wait_for_selector(".floor-map")
         assert page.title() == "Host Stand · The Steak House"
         assert page.locator(".table-node").count() == 33
-        assert "120 seats · 33 table units" in page.locator(".brand-lockup").inner_text()
+        assert "120 seats · 33 tables" in page.locator(".brand-lockup").inner_text()
         assert page.locator(".party-row").count() >= 8
         party_heights = page.locator(".party-row").evaluate_all("rows => rows.map(row => row.getBoundingClientRect().height)")
         assert max(party_heights) <= 100, party_heights

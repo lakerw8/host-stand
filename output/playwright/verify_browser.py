@@ -30,7 +30,7 @@ def main():
         assert page.title() == "Host Stand · The Steak House"
         assert page.locator(".table-node").count() == 33
         assert page.locator(".party-row").count() >= 8
-        assert "120 seats · 33 table units" in page.locator(".brand-lockup").inner_text()
+        assert "120 seats · 33 tables" in page.locator(".brand-lockup").inner_text()
         first_upcoming = page.locator('.party-row').first
         first_party_id = first_upcoming.get_attribute("data-party-id")
         first_party_name = first_upcoming.locator(".party-name").inner_text()

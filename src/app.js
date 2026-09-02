@@ -1021,7 +1021,7 @@ function render() {
           <span class="brand-mark" aria-hidden="true">HS</span>
           <div>
             <h1>Host Stand</h1>
-            <span>The Steak House · ${RESTAURANT_CAPACITY} seats · ${TABLE_UNIT_COUNT} table units</span>
+            <span>The Steak House · ${RESTAURANT_CAPACITY} seats · ${TABLE_UNIT_COUNT} tables</span>
           </div>
         </div>
         <div class="agent-strip" aria-label="Current agent plan">
