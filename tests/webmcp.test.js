@@ -27,7 +27,7 @@ test("the WebMCP catalog is discoverable, unique, and uses current annotations",
   const readTools = new Set(["get_floor", "get_queue", "score_assignment"]);
   const untrustedTools = new Set(["get_floor", "get_queue"]);
 
-  assert.equal(definitions.length, 21);
+  assert.equal(definitions.length, 22);
   assert.equal(new Set(names).size, definitions.length);
   for (const tool of definitions) {
     assert.match(tool.name, /^[A-Za-z0-9_.-]{1,128}$/);

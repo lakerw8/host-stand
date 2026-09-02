@@ -20,6 +20,7 @@ import {
   scoreAssignment,
   setCandidates,
   setPartyMarks,
+  setPlan,
   setWeights,
   unassignParty,
   unlockTable
@@ -190,6 +191,38 @@ export function createToolDefinitions({ state, clock, onChange }) {
         if (auto_assign_at != null && parsed == null) return { ok: false, error: { code: "INVALID_TIME", message: "Use a restaurant minute or a time such as 6:25 PM." } };
         return setCandidates(state, party_id, table_ids, parsed, { source: "agent", reason });
       })
+    },
+    {
+      name: "set_plan",
+      description: "Batch form of set_candidates for whole-night planning: post ranked tentative tables and a reason for up to 40 upcoming reservations or waiting parties in one call. Each entry is validated independently by the same rules (legality, host overrides, accepted plans, rejected tables); the result lists ok or an error per party, and the batch records one ledger row and one floor change. Use it for the first pass over the night and for re-plans that touch several parties; use set_candidates for one party.",
+      inputSchema: objectSchema(
+        {
+          plans: {
+            type: "array",
+            minItems: 1,
+            maxItems: 40,
+            description: "One entry per party, earliest first.",
+            items: objectSchema(
+              {
+                party_id: stringId("Upcoming reservation or waiting party id."),
+                table_ids: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true, items: { type: "string" }, description: "Ranked table ids, best first." },
+                reason: { type: "string", minLength: 2, maxLength: 180, description: "Concise reason; name the special request it honors when there is one." },
+                auto_assign_at: { oneOf: [{ type: "number" }, { type: "string" }], description: "Optional restaurant minute or clock time for a waiting party." }
+              },
+              ["party_id", "table_ids"]
+            )
+          }
+        },
+        ["plans"]
+      ),
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute: ({ plans }) => mutate(() => setPlan(state, plans.map((plan) => {
+        const parsed = plan.auto_assign_at == null ? null : parseTime(plan.auto_assign_at);
+        if (plan.auto_assign_at != null && parsed == null) {
+          return { partyId: plan.party_id, error: { code: "INVALID_TIME", message: "Use a restaurant minute or a time such as 6:25 PM." } };
+        }
+        return { partyId: plan.party_id, tableIds: plan.table_ids, reason: plan.reason, autoAssignAt: parsed };
+      }), { source: "agent" }))
     },
     {
       name: "assign_table",

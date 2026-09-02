@@ -24,7 +24,7 @@ Beats guaranteed by `DEMOAAFT`, all before 7:30 PM:
 Chrome with the WebMCP flag only proves registration; it has no agent that can call the tools. Run the demo in the **ChatGPT desktop app's built-in browser**, the same surface the judges use (verified 2026-09-01, app 26.825.51511, see `output/playwright/webmcp-browser-verification.md`).
 
 1. Open the ChatGPT desktop app and start a **New chat**. Pick model **GPT-5.6 Sol** (or Terra; Luna has site tools disabled). Avoid a chat bound to the Host Stand repo project, or add "do not run shell commands or edit files" to every prompt.
-2. Open the built-in browser: toggle the right side panel (⌥⌘B) and choose **Browser** (⌘T). Enter `https://host-stand-nine.vercel.app/?run=DEMOAAFT`. Confirm the label under the header reads `WebMCP: 21 tools · document`.
+2. Open the built-in browser: toggle the right side panel (⌥⌘B) and choose **Browser** (⌘T). Enter `https://host-stand-nine.vercel.app/?run=DEMOAAFT`. Confirm the label under the header reads `WebMCP: 22 tools · document`.
 3. In the chat, paste the **Connect AI** prompt from the page (it asks for autonomous mode and whole-night planning), then add: "Use only the page's site tools. When I say *next*, re-read get_floor and get_queue and re-plan the night, with a reason that names the request for every party that has one."
 4. The agent attaches, the header switches to **Agent: ChatGPT**, and its first plans appear on the cards.
 5. Pacing: ChatGPT acts once per message and does not poll, so keep the clock paused while it works, drive the clock yourself (Start at 5×, or the skip button), then say **next** at each beat below. The first turn plans the whole night; later turns adjust it. Autonomous plans still execute at arrival on their own, and earlier tentative tables may move when it re-plans, which is the point.
@@ -44,7 +44,7 @@ Chrome with the WebMCP flag only proves registration; it has no agent that can c
 
 ## 0:45–1:25 · Attach the agent, read the requests
 
-**Show:** Open **Connect AI**, copy the prompt into the ChatGPT chat beside the browser. Watch the header switch to **Agent: ChatGPT** and the label read `WebMCP: 21 tools · document`. The agent calls `attach_agent`, `get_floor`, `get_queue`. Jump to 6:40 and say **next**. Show the agent's tentative tables appearing on Vasquez, Baker, and Nakamura with reasons in the inspector.
+**Show:** Open **Connect AI**, copy the prompt into the ChatGPT chat beside the browser. Watch the header switch to **Agent: ChatGPT** and the label read `WebMCP: 22 tools · document`. The agent calls `attach_agent`, `get_floor`, `get_queue`. Jump to 6:40 and say **next**. Show the agent's tentative tables appearing on Vasquez, Baker, and Nakamura with reasons in the inspector.
 
 **Say:** "The agent discovers twenty-one tools in the page; no API key, no backend. It reads the floor geometry and the open requests as natural language. For the Nakamura note it has to choose between the regular and the anniversary, and explain why. The engine grades the explanation."
 

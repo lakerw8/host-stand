@@ -75,7 +75,7 @@ def main():
         response = page.goto(URL, wait_until="domcontentloaded")
         assert response is not None
         assert response.headers.get("origin-agent-cluster") == "?1"
-        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 21")
+        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 22")
 
         result = page.evaluate(r"""async () => {
           const status = await window.__HOST_STAND_WEBMCP_READY__;
@@ -139,7 +139,7 @@ def main():
         }""")
 
         assert result["status"]["supported"] is True
-        assert result["status"]["registered"] == 21
+        assert result["status"]["registered"] == 22
         assert result["status"]["entryPoint"] == "document"
         assert result["names"] == sorted(result["names"])
         assert result["allSchemasAreObjects"] is True
@@ -163,7 +163,7 @@ def main():
         assert result["aborted"]["payload"]["error"]["code"] == "ABORTED"
         assert result["reset"] == {"clock": "5:00 PM", "running": False, "runChanged": True, "controllerMode": "external", "agentName": "WebMCP Test Agent"}
         assert "WebMCP Test Agent attached" in page.locator(".simulation-console__details .mcp-status").inner_text()
-        assert "WebMCP: 21 tools · document" in page.locator(".mcp-status--strip").inner_text()
+        assert "WebMCP: 22 tools · document" in page.locator(".mcp-status--strip").inner_text()
         assert console_errors == [], f"browser console errors: {console_errors}"
         browser.close()
 
@@ -176,13 +176,13 @@ def main():
         page.on("console", lambda message: navigator_console_errors.append(message.text) if message.type == "error" else None)
         page.on("pageerror", lambda error: navigator_console_errors.append(str(error)))
         page.goto(URL, wait_until="domcontentloaded")
-        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 21")
+        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 22")
         navigator_status = page.evaluate("() => window.__HOST_STAND_WEBMCP_STATUS__")
         assert navigator_status["entryPoint"] == "navigator", navigator_status
         assert navigator_status["supported"] is True
         assert page.evaluate("typeof document.modelContext") == "undefined"
-        assert page.evaluate("async () => (await navigator.modelContext.getTools()).length") == 21
-        assert "WebMCP: 21 tools · navigator" in page.locator(".mcp-status--strip").inner_text()
+        assert page.evaluate("async () => (await navigator.modelContext.getTools()).length") == 22
+        assert "WebMCP: 22 tools · navigator" in page.locator(".mcp-status--strip").inner_text()
         assert navigator_console_errors == [], f"navigator fallback console errors: {navigator_console_errors}"
         browser.close()
 
@@ -198,7 +198,7 @@ def main():
         page.on("pageerror", lambda error: native_console_errors.append(str(error)))
         page.goto(URL, wait_until="domcontentloaded")
         assert page.evaluate("typeof document.modelContext?.registerTool") == "function"
-        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 21")
+        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 22")
         native_status = page.evaluate("() => window.__HOST_STAND_WEBMCP_STATUS__")
         native_version = page.evaluate("() => navigator.userAgent")
 
@@ -237,7 +237,7 @@ def main():
           };
         }""")
 
-        assert native_result["count"] == 21
+        assert native_result["count"] == 22
         assert native_status["entryPoint"] in ("document", "navigator")
         assert native_result["names"] == sorted(native_result["names"])
         assert native_result["readOnlyCount"] == 3
@@ -252,9 +252,9 @@ def main():
         browser.close()
 
     print("PASS · Origin-Agent-Cluster enables an origin-isolated WebMCP document")
-    print(f"PASS · native WebMCP registers all 21 tools via {native_status['entryPoint']}.modelContext ({native_version})")
+    print(f"PASS · native WebMCP registers all 22 tools via {native_status['entryPoint']}.modelContext ({native_version})")
     print("PASS · registration falls back to navigator.modelContext when document.modelContext is absent")
-    print("PASS · an independent client discovers 21 sorted tools through getTools()")
+    print("PASS · an independent client discovers 22 sorted tools through getTools()")
     print("PASS · schemas, readOnlyHint, untrustedContentHint, and expected_version survive discovery")
     print("PASS · executeTool() reads, scores, writes, and verifies shared page state")
     print("PASS · a stale expected_version returns STALE_STATE with the missed change")

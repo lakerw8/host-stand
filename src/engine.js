@@ -787,8 +787,10 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
     party.autoAssignAt = Math.max(state.now, Math.round(deadline));
   }
   if (party.status === "upcoming") party.autoAssignAt = null;
-  recordChange(state, "plan", { partyId: party.id, tableId: uniqueIds[0], by: changeOwner(source), detail: `${party.name} planned for ${uniqueIds.join(" · ")}` });
-  logActivity(state, "set_candidates", `${party.name} → ${uniqueIds.join(" · ")}`, source);
+  if (!options.quiet) {
+    recordChange(state, "plan", { partyId: party.id, tableId: uniqueIds[0], by: changeOwner(source), detail: `${party.name} planned for ${uniqueIds.join(" · ")}` });
+    logActivity(state, "set_candidates", `${party.name} → ${uniqueIds.join(" · ")}`, source);
+  }
   if (state.controllerMode === "external" && source === "agent") {
     state.agentReview.status = "planned";
     state.agentReview.reason = "external plan received";
@@ -799,6 +801,36 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
     state.agentReview.changedPartyCount = Number(previousTop !== uniqueIds[0]);
   }
   return success(state, { partyId, tableIds: uniqueIds, autoAssignAt: party.autoAssignAt });
+}
+
+export const PLAN_BATCH_LIMIT = 40;
+
+// Batch planning: one call posts tentative tables for many parties so a
+// whole-night pass is a handful of round trips instead of one per party.
+// Every entry goes through setCandidates and its rules; the batch records one
+// change and one ledger row.
+export function setPlan(state, plans, options = {}) {
+  const source = options.source || "agent";
+  if (!Array.isArray(plans) || !plans.length) return failure(state, "PLANS_REQUIRED", `Provide one to ${PLAN_BATCH_LIMIT} plans.`);
+  if (plans.length > PLAN_BATCH_LIMIT) return failure(state, "TOO_MANY_PLANS", `Post at most ${PLAN_BATCH_LIMIT} plans per call.`);
+  const results = plans.map((plan) => {
+    if (plan.error) return { partyId: plan.partyId ?? null, ok: false, error: plan.error };
+    const result = setCandidates(state, plan.partyId, plan.tableIds || [], plan.autoAssignAt ?? null, { source, reason: plan.reason, quiet: true });
+    return result.ok
+      ? { partyId: plan.partyId, ok: true, tableIds: result.tableIds, autoAssignAt: result.autoAssignAt }
+      : { partyId: plan.partyId, ok: false, error: result.error };
+  });
+  const planned = results.filter((result) => result.ok);
+  const rejected = results.filter((result) => !result.ok);
+  const summary = `${planned.length} planned${rejected.length ? ` · ${rejected.length} rejected (${rejected.slice(0, 3).map((result) => result.partyId).join(", ")}${rejected.length > 3 ? "…" : ""})` : ""}`;
+  if (planned.length) {
+    recordChange(state, "plan", { by: changeOwner(source), detail: `Whole-night plan: ${summary}` });
+  }
+  logActivity(state, "set_plan", summary, source);
+  if (!planned.length) {
+    return failure(state, "PLAN_REJECTED", `No plan was accepted: ${rejected[0].error.message}`, { planned: 0, rejected: rejected.length, results });
+  }
+  return success(state, { planned: planned.length, rejected: rejected.length, results });
 }
 
 export function setHostCandidateOverride(state, partyId, tableId) {
