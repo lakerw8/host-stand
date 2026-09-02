@@ -3426,3 +3426,17 @@ svg {
     font-size: 0.75rem;
   }
 }
+
+/* The bar label takes the empty entrance cell above the counter column instead
+   of sitting rotated under it. */
+@media (min-width: 60rem) {
+  .zone-label--bar {
+    align-self: end;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: center;
+    padding-block-end: var(--space-3xs);
+    position: static;
+    transform: none;
+  }
+}
