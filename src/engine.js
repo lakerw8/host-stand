@@ -128,8 +128,8 @@ export function createInitialState(options = {}) {
     activity: [
       {
         minute: SERVICE_START,
-        tool: "get_floor",
-        detail: "Service snapshot ready",
+        tool: "service",
+        detail: "Doors open · floor is clear",
         source: "system"
       }
     ],
@@ -1160,7 +1160,7 @@ function processEvent(state, event) {
         ? `${party.name} arrived · party grew ${previousSize} → ${party.size}`
         : `${party.name} arrived · party of ${party.size}`;
       recordChange(state, "arrival", { partyId: party.id, detail: arrivalDetail });
-      logActivity(state, "get_queue", arrivalDetail, "clock");
+      logActivity(state, "arrival", arrivalDetail, "clock");
       changed = true;
     }
   }
@@ -1174,7 +1174,7 @@ function processEvent(state, event) {
       releasePartyHolds(state, party);
       state.disruptions.push({ type: "no_show", at: state.now, partyId: party.id, detail: `${party.name} did not show for ${minutesToTime(party.reservedFor)}`, resolved: true });
       recordChange(state, "party_status", { partyId: party.id, detail: `${party.name} no-show` });
-      logActivity(state, "mark_party", `${party.name} → no-show`, "clock");
+      logActivity(state, "no_show", `${party.name} → no-show`, "clock");
       changed = true;
     }
   }
@@ -1182,7 +1182,7 @@ function processEvent(state, event) {
     state.kitchenDelayUntil = event.until;
     state.disruptions.push({ type: "kitchen_delay", at: state.now, partyId: null, detail: `Kitchen delay through ${minutesToTime(event.until)}`, until: event.until, resolved: false });
     recordChange(state, "kitchen", { detail: `Kitchen delay through ${minutesToTime(event.until)}` });
-    logActivity(state, "get_floor", `Kitchen delay through ${minutesToTime(event.until)}`, "clock");
+    logActivity(state, "kitchen_delay", `Kitchen delay through ${minutesToTime(event.until)}`, "clock");
     changed = true;
   }
   if (event.type === "party_update") {
@@ -1231,7 +1231,7 @@ function processMinute(state) {
     for (const disruption of state.disruptions) {
       if (disruption.type === "kitchen_delay" && !disruption.resolved) disruption.resolved = true;
     }
-    logActivity(state, "get_floor", "Kitchen delay cleared", "clock");
+    logActivity(state, "kitchen_delay", "Kitchen delay cleared", "clock");
     reviewReasons.push("kitchen delay cleared");
   }
   const events = state.events.filter((event) => event.minute === state.now && !state.processedEvents.includes(`${event.minute}:${event.type}`));
