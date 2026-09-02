@@ -25,9 +25,9 @@ Chrome with the WebMCP flag only proves registration; it has no agent that can c
 
 1. Open the ChatGPT desktop app and start a **New chat**. Pick model **GPT-5.6 Sol** (or Terra; Luna has site tools disabled). Avoid a chat bound to the Host Stand repo project, or add "do not run shell commands or edit files" to every prompt.
 2. Open the built-in browser: toggle the right side panel (⌥⌘B) and choose **Browser** (⌘T). Enter `https://host-stand-nine.vercel.app/?run=DEMOAAFT`. Confirm the label under the header reads `WebMCP: 21 tools · document`.
-3. In the chat, paste the **Connect AI** prompt from the page (it asks for autonomous mode), then add: "Use only the page's site tools. When I say *next*, re-read get_floor and get_queue and update every plan inside the horizon with a reason that names the request."
+3. In the chat, paste the **Connect AI** prompt from the page (it asks for autonomous mode and whole-night planning), then add: "Use only the page's site tools. When I say *next*, re-read get_floor and get_queue and re-plan the night, with a reason that names the request for every party that has one."
 4. The agent attaches, the header switches to **Agent: ChatGPT**, and its first plans appear on the cards.
-5. Pacing: ChatGPT acts once per message and does not poll, so drive the clock yourself (Start at 5×, or the skip button), then say **next** at each beat below. Autonomous plans still execute at arrival on their own.
+5. Pacing: ChatGPT acts once per message and does not poll, so keep the clock paused while it works, drive the clock yourself (Start at 5×, or the skip button), then say **next** at each beat below. The first turn plans the whole night; later turns adjust it. Autonomous plans still execute at arrival on their own, and earlier tentative tables may move when it re-plans, which is the point.
 6. Record with ⌘⇧5 on the app window. The split view shows tool calls on the left and the floor on the right; the browser panel's expand button gives a full-width floor for close-ups. Quit any dictation overlay first; one sits over the composer on this Mac.
 
 ## 0:00–0:20 · The problem

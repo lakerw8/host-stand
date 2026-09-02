@@ -1284,7 +1284,7 @@ export function attachExternalAgent(state, name, mode = "autonomous") {
     plannedPartyCount: state.parties.filter((party) => party.candidateTableIds.length).length,
     changedPartyCount: 0
   };
-  state.plan = `${cleanName} is attached through WebMCP in ${mode} mode and is reading the floor.`;
+  state.plan = `${cleanName} is attached through WebMCP in ${mode} mode and is planning the whole night.`;
   recordChange(state, "agent", { by: "AI", detail: `${cleanName} attached (${mode})` });
   logActivity(state, "attach_agent", `${cleanName} · ${mode}`, "agent");
   return success(state, {
@@ -1799,14 +1799,85 @@ export function getRequestOutcomes(state) {
   return [...partyOutcomes, ...sectionOutcomes];
 }
 
+// ---------------------------------------------------------------------------
+// Whole-night plan board
+//
+// The agent plans the entire service, not a rolling window: every upcoming
+// reservation may carry a tentative table now so scarce tables (window,
+// private room, eight-tops) are protected for the requests that need them.
+// The board shows, per table, who is planned there and when, and flags plans
+// that collide in time. Plans are tentative and expected to change.
+// ---------------------------------------------------------------------------
+
+function plannedStart(state, party) {
+  return party.status === "waiting" ? state.now : party.reservedFor;
+}
+
+function plannedFinish(state, party) {
+  return plannedStart(state, party) + (party.marks.rush ? RUSH_DWELL_MINUTES : EXPECTED_DWELL_MINUTES);
+}
+
+export function getPlanBoard(state) {
+  const byTable = new Map();
+  for (const party of state.parties) {
+    if (!["upcoming", "waiting"].includes(party.status) || party.committedTableId || !party.candidateTableIds.length) continue;
+    const tableId = party.candidateTableIds[0];
+    const entries = byTable.get(tableId) || [];
+    entries.push({
+      partyId: party.id,
+      partyName: party.name,
+      size: party.size,
+      startsAt: plannedStart(state, party),
+      expectedFinishAt: plannedFinish(state, party),
+      candidateState: party.candidateState,
+      hasRequest: Boolean(party.request)
+    });
+    byTable.set(tableId, entries);
+  }
+  const conflicts = [];
+  for (const [tableId, entries] of byTable) {
+    entries.sort((left, right) => left.startsAt - right.startsAt);
+    const table = getTable(state, tableId);
+    const occupiedUntil = table?.status === "seated" && table.dueAt != null ? table.dueAt + TABLE_RESET_MINUTES : null;
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const previous = index > 0 ? entries[index - 1] : null;
+      const blockedBy = previous && entry.startsAt < previous.expectedFinishAt + TABLE_RESET_MINUTES
+        ? previous.partyId
+        : occupiedUntil != null && entry.startsAt < occupiedUntil ? table.partyId : null;
+      if (blockedBy) {
+        conflicts.push({
+          tableId,
+          partyId: entry.partyId,
+          partyName: entry.partyName,
+          startsAt: entry.startsAt,
+          blockedBy,
+          detail: `${entry.partyName} is planned for ${tableId} at ${minutesToTime(entry.startsAt)} but ${getParty(state, blockedBy)?.name || blockedBy} is expected there until ${minutesToTime(previous ? previous.expectedFinishAt + TABLE_RESET_MINUTES : occupiedUntil)}`
+        });
+      }
+    }
+  }
+  return { byTable, conflicts };
+}
+
 function nextRecommendedActions(state) {
   if (state.now >= SERVICE_END) return ["Review the service recap", "Start a new random run"];
   const waitingReservation = state.parties.find((party) => party.source === "reservation" && party.status === "waiting" && !party.committedTableId);
   const upcomingRequests = listOpenRequests(state)
-    .filter((request) => request.status === "open" && request.partyId && request.arrivesAt != null && request.arrivesAt <= state.now + AGENT_PLANNING_HORIZON_MINUTES)
+    .filter((request) => request.status === "open" && request.partyId && request.arrivesAt != null)
     .filter((request) => !getParty(state, request.partyId)?.committedTableId && !getParty(state, request.partyId)?.candidateTableIds.length)
-    .slice(0, 2)
-    .map((request) => `Special request from ${request.partyName} (${minutesToTime(request.arrivesAt)}): “${request.text.length > 90 ? `${request.text.slice(0, 87)}…` : request.text}”`);
+    .slice(0, 3)
+    .map((request) => `Unplanned special request from ${request.partyName} (${minutesToTime(request.arrivesAt)}): “${request.text.length > 90 ? `${request.text.slice(0, 87)}…` : request.text}”`);
+  const unplannedReservations = state.parties.filter((party) => (
+    party.source === "reservation" && party.status === "upcoming" && !party.candidateTableIds.length && !party.committedTableId
+  )).length;
+  const board = state.controllerMode === "external" ? getPlanBoard(state) : { conflicts: [] };
+  const planningActions = state.controllerMode === "external"
+    ? [
+      ...(unplannedReservations ? [`Plan the whole night: ${unplannedReservations} upcoming reservation${unplannedReservations === 1 ? " has" : "s have"} no tentative table yet. Post one for every reservation, earliest first, and protect window, private-room, and eight-top tables for the later requests that need them.`] : []),
+      ...board.conflicts.slice(0, 3).map((conflict) => `Plan conflict: ${conflict.detail}`)
+    ]
+    : [];
   if (state.controllerMode === "manual") {
     return [
       ...(waitingReservation
@@ -1824,12 +1895,13 @@ function nextRecommendedActions(state) {
     ]
     : [];
   const base = state.agentReview.status === "review_due"
-    ? ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason that says how the plan honors any special request", "Explain the current whole-floor plan"]
-    : ["Keep tentative tables current for parties inside the 45-minute horizon", "Re-read get_floor after every write"];
-  return [...delayActions, ...upcomingRequests, ...base, `Pass expected_version: ${state.floorVersion} on your next write so a host change is never clobbered`];
+    ? ["Read get_floor and get_queue", "Re-plan any tentative table the change affects; plans are expected to move as constraints change", "Explain the current whole-floor plan"]
+    : ["Keep the whole-night plan current: every upcoming reservation carries a tentative table", "Re-read get_floor after every write"];
+  return [...delayActions, ...planningActions, ...upcomingRequests, ...base, `Pass expected_version: ${state.floorVersion} on your next write so a host change is never clobbered`];
 }
 
 export function getFloorSnapshot(state) {
+  const board = getPlanBoard(state);
   return {
     clock: minutesToTime(state.now),
     minute: state.now,
@@ -1852,8 +1924,14 @@ export function getFloorSnapshot(state) {
       heartbeatMinutes: AGENT_HEARTBEAT_MINUTES,
       planningHorizonMinutes: AGENT_PLANNING_HORIZON_MINUTES,
       freezeWindowMinutes: AGENT_FREEZE_WINDOW_MINUTES,
-      strategy: "event-driven plus heartbeat",
+      strategy: "whole-night plan, re-planned after every event and heartbeat",
+      planningPolicy: "Post a tentative table for every upcoming reservation now, not only the next 45 minutes, so scarce tables are protected for the requests that need them. Plans are tentative and expected to change; host overrides, accepted plans, and rejected tables are fixed.",
       servicePriority: "seat waiting reservations before walk-ins whenever a legal table is available; host assignments may override"
+    },
+    planBoard: {
+      plannedTables: board.byTable.size,
+      plannedParties: [...board.byTable.values()].reduce((total, entries) => total + entries.length, 0),
+      conflicts: board.conflicts
     },
     capacity: RESTAURANT_CAPACITY,
     tableUnitCount: state.tables.length,
@@ -1912,6 +1990,7 @@ export function getFloorSnapshot(state) {
       partyMarks: table.status === "seated" && table.partyId
         ? { rush: Boolean(getParty(state, table.partyId)?.marks.rush), allergy: Boolean(getParty(state, table.partyId)?.marks.allergy) }
         : null,
+      plannedParties: board.byTable.get(table.id) || [],
       likelyFree: table.status === "seated" && table.dueAt
         ? { earliest: table.dueAt + TABLE_RESET_MINUTES, latest: table.dueAt + TABLE_RESET_MINUTES }
         : table.status === "dirty" && table.dirtyUntil
@@ -1934,6 +2013,7 @@ export function getQueueSnapshot(state) {
     },
     serviceBrief: clone(state.serviceBrief),
     requestPolicy: "Special requests are natural language written by guests or the host. Interpret intent; the floor grades outcomes at 10 PM. Say how your plan honors a request in `reason`.",
+    planningPolicy: "Plan the whole night: every upcoming reservation may carry a tentative table now. Use get_floor.planBoard and each table's plannedParties to keep plans from colliding in time and to protect window, private-room, and eight-top tables for later requests. Re-plan freely after every event; only host overrides, accepted plans, and rejected tables are fixed.",
     openRequests: listOpenRequests(state),
     nextRecommendedActions: nextRecommendedActions(state),
     reservations: state.parties.filter((party) => party.source === "reservation" && ["upcoming", "waiting"].includes(party.status)).map(queueParty(state)),
