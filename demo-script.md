@@ -19,6 +19,17 @@ Beats guaranteed by `DEMOAAFT`, all before 7:30 PM:
 | 7:30 | Ortiz (2, reservation) | Host note: likely the critic, best section, no flags | E2 discretion |
 | 7:00–8:30 | Mia's window section | Host note: trainee, couples only, no allergy parties | D2 section |
 
+## Setup · which agent runs the demo
+
+Chrome with the WebMCP flag only proves registration; it has no agent that can call the tools. Run the demo in the **ChatGPT desktop app's built-in browser**, the same surface the judges use (verified 2026-09-01, app 26.825.51511, see `output/playwright/webmcp-browser-verification.md`).
+
+1. Open the ChatGPT desktop app and start a **New chat**. Pick model **GPT-5.6 Sol** (or Terra; Luna has site tools disabled). Avoid a chat bound to the Host Stand repo project, or add "do not run shell commands or edit files" to every prompt.
+2. Open the built-in browser: toggle the right side panel (⌥⌘B) and choose **Browser** (⌘T). Enter `https://host-stand-nine.vercel.app/?run=DEMOAAFT`. Confirm the label under the header reads `WebMCP: 21 tools · document`.
+3. In the chat, paste the **Connect AI** prompt from the page (it asks for autonomous mode), then add: "Use only the page's site tools. When I say *next*, re-read get_floor and get_queue and update every plan inside the horizon with a reason that names the request."
+4. The agent attaches, the header switches to **Agent: ChatGPT**, and its first plans appear on the cards.
+5. Pacing: ChatGPT acts once per message and does not poll, so drive the clock yourself (Start at 5×, or the skip button), then say **next** at each beat below. Autonomous plans still execute at arrival on their own.
+6. Record with ⌘⇧5 on the app window. The split view shows tool calls on the left and the floor on the right; the browser panel's expand button gives a full-width floor for close-ups. Quit any dictation overlay first; one sits over the composer on this Mac.
+
 ## 0:00–0:20 · The problem
 
 **Show:** The paused 5:00 PM floor for `DEMOAAFT`. Scroll the queue to the Nakamura card with its `NOTE` badge.
@@ -33,7 +44,7 @@ Beats guaranteed by `DEMOAAFT`, all before 7:30 PM:
 
 ## 0:45–1:25 · Attach the agent, read the requests
 
-**Show:** Open **Connect AI**, copy the prompt into your WebMCP-capable browser agent. Watch the header switch to **Agent: name** and the chip read `WebMCP: 21 tools · document`. The agent calls `attach_agent`, `get_floor`, `get_queue`. Jump to 6:40. Show the agent's tentative tables appearing on Vasquez, Baker, and Nakamura with reasons in the inspector.
+**Show:** Open **Connect AI**, copy the prompt into the ChatGPT chat beside the browser. Watch the header switch to **Agent: ChatGPT** and the label read `WebMCP: 21 tools · document`. The agent calls `attach_agent`, `get_floor`, `get_queue`. Jump to 6:40 and say **next**. Show the agent's tentative tables appearing on Vasquez, Baker, and Nakamura with reasons in the inspector.
 
 **Say:** "The agent discovers twenty-one tools in the page; no API key, no backend. It reads the floor geometry and the open requests as natural language. For the Nakamura note it has to choose between the regular and the anniversary, and explain why. The engine grades the explanation."
 
@@ -60,7 +71,7 @@ End on the scorecard with the public demo URL and GitHub repository visible in t
 ## Recording checklist
 
 - [ ] Keep the final video below three minutes.
-- [ ] Load `DEMOAAFT` before recording and confirm the footer shows it.
+- [ ] Run inside the ChatGPT desktop app's built-in browser with GPT-5.6 Sol; load `DEMOAAFT` and confirm the footer shows it.
 - [ ] Capture an actual external-agent tool call with a visible reason that references a request.
 - [ ] Show Accept (`AI ✓`) and Reject with a reason.
 - [ ] Show the injection probe being blocked and one `STALE_STATE` ledger row.
