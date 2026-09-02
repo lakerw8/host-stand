@@ -2250,6 +2250,53 @@ svg {
   display: inline-flex;
 }
 
+.run-code-form {
+  align-items: end;
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.run-code-form label {
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.run-code-form label > span {
+  color: var(--color-paper-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.run-code-form input {
+  background: var(--color-graphite-2);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-graphite-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+  min-height: 2.75rem;
+  padding-inline: var(--space-sm);
+  text-transform: uppercase;
+  width: 9rem;
+}
+
+.run-code-form input:focus-visible {
+  border-color: var(--color-focus);
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.simulation-console .run-code-form .control {
+  background: var(--color-graphite-2);
+  border-color: var(--color-rule-2);
+  color: var(--color-graphite-ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 .product-bar {
   align-items: center;
   background: var(--color-paper-raised);

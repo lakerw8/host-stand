@@ -31,9 +31,18 @@ import {
 import { registerWebMCP } from "./webmcp.js";
 
 const root = document.querySelector("#app");
-let seedSequence = 0;
-const createScenarioSeed = () => globalThis.crypto?.randomUUID?.() || `night-${Date.now()}-${seedSequence++}`;
-let state = createInitialState({ scenarioSeed: createScenarioSeed(), randomizeScenario: true });
+const RUN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+// A run code is the scenario seed itself, so a code shown in the footer (or
+// printed by `npm run seed:demo`) reproduces the exact night when loaded.
+const createScenarioSeed = () => {
+  const values = new Uint8Array(8);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(values);
+  else for (let index = 0; index < values.length; index += 1) values[index] = Math.floor(Math.random() * 256);
+  return [...values].map((value) => RUN_CODE_ALPHABET[value % RUN_CODE_ALPHABET.length]).join("");
+};
+const normalizeRunCode = (value) => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+const requestedRunCode = normalizeRunCode(new URLSearchParams(globalThis.location?.search || "").get("run"));
+let state = createInitialState({ scenarioSeed: requestedRunCode || createScenarioSeed(), randomizeScenario: true });
 let selectedPartyId = null;
 let selectedTableId = null;
 let hoverPartyId = null;
@@ -321,11 +330,18 @@ function renderAgentChange() {
   }
 }
 
-function resetNight() {
+function syncRunCodeUrl() {
+  if (!globalThis.history?.replaceState || !globalThis.location) return;
+  const url = new URL(globalThis.location.href);
+  url.searchParams.set("run", state.runCode);
+  globalThis.history.replaceState(null, "", url);
+}
+
+function resetNight(runCode = null) {
   const previousController = state.controllerMode;
   const previousConnection = state.agentConnection ? { ...state.agentConnection } : null;
   const fresh = createInitialState({
-    scenarioSeed: createScenarioSeed(),
+    scenarioSeed: normalizeRunCode(runCode) || createScenarioSeed(),
     randomizeScenario: true
   });
   if (previousController === "external" && previousConnection) {
@@ -355,9 +371,10 @@ function resetNight() {
   recapClosedForRun = null;
   resetQueueViewport = true;
   feedback = {
-    message: `New random run ${fresh.runCode} generated. Service is paused at ${minutesToTime(SERVICE_START)}${previousConnection ? `; ${previousConnection.name} remains attached.` : "."}`,
+    message: `${runCode ? `Run ${fresh.runCode} loaded` : `New random run ${fresh.runCode} generated`}. Service is paused at ${minutesToTime(SERVICE_START)}${previousConnection ? `; ${previousConnection.name} remains attached.` : "."}`,
     tone: "success"
   };
+  syncRunCodeUrl();
 }
 
 const clock = {
@@ -985,6 +1002,13 @@ function render() {
               </div>
             </div>
             ${renderWebMCPBadge()}
+            <form class="run-code-form" data-form="load-run" aria-label="Load a run by code">
+              <label>
+                <span>Run code</span>
+                <input type="text" name="run" maxlength="8" placeholder="${escapeHtml(state.runCode)}" autocomplete="off" spellcheck="false" aria-label="Run code to load" data-focus-key="run-code" />
+              </label>
+              <button class="control control--quiet" type="submit">Load run</button>
+            </form>
           </div>
       </header>
 
@@ -1222,6 +1246,19 @@ root.addEventListener("click", (event) => {
 });
 
 root.addEventListener("submit", (event) => {
+  const runForm = event.target.closest('[data-form="load-run"]');
+  if (runForm) {
+    event.preventDefault();
+    const code = normalizeRunCode(runForm.querySelector("input[name=run]").value);
+    interactionHold = false;
+    if (!code) {
+      showFeedback("Enter a run code such as the one in the footer, or press New run for a random night.");
+    } else {
+      resetNight(code);
+    }
+    render();
+    return;
+  }
   const rejectForm = event.target.closest('[data-form="reject-plan"]');
   if (rejectForm) {
     event.preventDefault();
@@ -1249,11 +1286,11 @@ root.addEventListener("submit", (event) => {
 });
 
 root.addEventListener("focusin", (event) => {
-  if (event.target.matches('[data-form="add-host-note"] input, [data-form="reject-plan"] input')) interactionHold = true;
+  if (event.target.matches('[data-form="add-host-note"] input, [data-form="reject-plan"] input, [data-form="load-run"] input')) interactionHold = true;
 });
 
 root.addEventListener("focusout", (event) => {
-  if (event.target.matches('[data-form="add-host-note"] input, [data-form="reject-plan"] input')) {
+  if (event.target.matches('[data-form="add-host-note"] input, [data-form="reject-plan"] input, [data-form="load-run"] input')) {
     interactionHold = false;
     if (!event.target.value) render();
   }
@@ -1384,6 +1421,7 @@ function serviceTick(now) {
 setInterval(() => serviceTick(performance.now()), 100);
 
 render();
+syncRunCodeUrl();
 const exposedTo = document.querySelector('meta[name="webmcp-exposed-to"]')?.content
   .split(",")
   .map((origin) => origin.trim())
