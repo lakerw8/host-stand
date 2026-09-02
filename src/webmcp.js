@@ -1,14 +1,15 @@
 import { parseTime } from "./data.js";
 import {
   addHostNote,
-  advanceTo,
   attachExternalAgent,
   assignTable,
+  checkExpectedVersion,
   detachExternalAgent,
   explainPlan,
   getFloorSnapshot,
   getQueueSnapshot,
   holdTable,
+  jumpClock,
   lockTable,
   markParty,
   markTable,
@@ -370,7 +371,7 @@ export function createToolDefinitions({ state, clock, onChange }) {
         if (time != null) {
           const parsed = parseTime(time);
           if (parsed == null) return { ok: false, error: { code: "INVALID_TIME", message: "Use a restaurant minute or a time such as 6:41 PM." } };
-          const result = advanceTo(state, parsed);
+          const result = jumpClock(state, parsed, { source: "agent" });
           if (!result.ok) return result;
         }
         if (speed != null) {
@@ -384,7 +385,42 @@ export function createToolDefinitions({ state, clock, onChange }) {
     }
   ];
 
-  return definitions.map((definition) => ({
+  // Every write tool accepts an optional expected_version. A mismatch is rejected
+  // with STALE_STATE and the missed changes; a match (or omission) proceeds and the
+  // result carries the new floorVersion.
+  const withConcurrency = (definition) => {
+    if (definition.annotations.readOnlyHint) return definition;
+    const inputSchema = {
+      ...definition.inputSchema,
+      properties: {
+        ...definition.inputSchema.properties,
+        expected_version: {
+          type: "integer",
+          minimum: 0,
+          description: "Optional floorVersion from your last read or write. If the floor has changed since then, the write is rejected with STALE_STATE and the missed changes."
+        }
+      }
+    };
+    return {
+      ...definition,
+      inputSchema,
+      description: `${definition.description} Accepts expected_version for optimistic concurrency.`,
+      execute: (input = {}, options) => {
+        const { expected_version: expectedVersion, ...rest } = input;
+        const stale = checkExpectedVersion(state, expectedVersion, { tool: definition.name });
+        if (stale) {
+          onChange?.();
+          return stale;
+        }
+        const result = definition.execute(rest, options);
+        return result && typeof result.then === "function"
+          ? result.then((resolved) => (resolved?.ok ? { ...resolved, floorVersion: state.floorVersion } : resolved))
+          : (result?.ok ? { ...result, floorVersion: state.floorVersion } : result);
+      }
+    };
+  };
+
+  return definitions.map((definition) => withConcurrency({
     title: definition.name.split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" "),
     ...definition
   }));

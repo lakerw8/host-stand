@@ -1531,6 +1531,21 @@ svg {
   border-block-end: 0;
 }
 
+.activity-ledger li.is-rejected {
+  background: var(--color-error-soft);
+  border-inline-start: 3px solid var(--color-error);
+}
+
+.activity-ledger li.is-rejected code {
+  color: var(--color-error);
+  font-weight: 700;
+}
+
+.activity-ledger li.is-rejected > span {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
 .activity-ledger time,
 .activity-ledger code {
   color: var(--color-neutral);

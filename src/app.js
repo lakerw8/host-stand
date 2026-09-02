@@ -18,6 +18,7 @@ import {
   getReservationPriorityBlocker,
   getServiceRecap,
   getTable,
+  jumpClock,
   lockTable,
   markParty,
   markTable,
@@ -695,9 +696,9 @@ function renderActivity() {
       </div>
       <ol>
         ${state.activity.slice(0, 6).map((entry) => `
-          <li>
+          <li class="${entry.tool === "stale_write" ? "is-rejected" : ""}" ${entry.tool === "stale_write" ? `title="${escapeHtml(entry.detail)}"` : ""}>
             <time>${minutesToTime(entry.minute).replace(" PM", "")}</time>
-            <code>${escapeHtml(entry.tool)}</code>
+            <code>${escapeHtml(entry.tool === "stale_write" ? "STALE_STATE" : entry.tool)}</code>
             <span>${escapeHtml(entry.detail)}</span>
           </li>
         `).join("")}
@@ -1010,7 +1011,7 @@ function openPalette() {
 function runPaletteAction(action) {
   if (action === "toggle-clock") state.running ? clock.pause() : clock.resume();
   if (action === "next-event") {
-    advanceTo(state, getNextEventMinute(state));
+    jumpClock(state, getNextEventMinute(state), { source: "host" });
     closePalette();
     renderAgentChange();
     return;
@@ -1034,7 +1035,7 @@ root.addEventListener("click", (event) => {
   if (action === "toggle-clock") state.running ? clock.pause() : clock.resume();
   if (action === "set-speed") clock.setSpeed(Number(target.dataset.speed));
   if (action === "next-event") {
-    advanceTo(state, getNextEventMinute(state));
+    jumpClock(state, getNextEventMinute(state), { source: "host" });
     renderAgentChange();
     return;
   }

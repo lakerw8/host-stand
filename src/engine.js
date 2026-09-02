@@ -114,6 +114,8 @@ export function createInitialState(options = {}) {
     serviceBrief: clone(scenario.serviceBrief),
     sectionRequests: clone(scenario.sectionRequests || []),
     disruptions: [],
+    floorVersion: 0,
+    changeLog: [],
     scenarioSeed: scenario.seed,
     runCode: scenario.runCode,
     preferenceSeed: scenario.seed,
@@ -151,6 +153,64 @@ export function getWaitingParties(state) {
 
 function bump(state) {
   state.revision += 1;
+}
+
+// ---------------------------------------------------------------------------
+// Optimistic concurrency
+//
+// Every mutation that changes assignments, holds, locks, marks, table status,
+// requests, plans, or the clock increments floorVersion and appends to a ring
+// buffer of the last 50 changes. Writes may pass expected_version; a mismatch
+// is rejected with STALE_STATE and the diff so a human and an agent editing the
+// same floor never silently clobber each other.
+// ---------------------------------------------------------------------------
+
+export const CHANGE_LOG_LIMIT = 50;
+
+const changeOwner = (source) => (source === "host" ? "HOST" : source === "agent" ? "AI" : "CLOCK");
+
+function recordChange(state, type, details = {}) {
+  state.floorVersion += 1;
+  state.changeLog.push({
+    version: state.floorVersion,
+    minute: state.now,
+    type,
+    partyId: details.partyId ?? null,
+    tableId: details.tableId ?? null,
+    by: details.by ?? "CLOCK",
+    detail: details.detail ?? null
+  });
+  if (state.changeLog.length > CHANGE_LOG_LIMIT) state.changeLog = state.changeLog.slice(-CHANGE_LOG_LIMIT);
+  bump(state);
+}
+
+export function changesSince(state, version) {
+  const oldest = state.changeLog[0]?.version ?? state.floorVersion + 1;
+  return {
+    changes: state.changeLog.filter((change) => change.version > version),
+    truncated: version < oldest - 1
+  };
+}
+
+export function checkExpectedVersion(state, expectedVersion, options = {}) {
+  if (expectedVersion == null) return null;
+  const expected = Number(expectedVersion);
+  if (!Number.isInteger(expected) || expected < 0) {
+    return failure(state, "INVALID_INPUT", "expected_version must be a non-negative integer.");
+  }
+  if (expected === state.floorVersion) return null;
+  const { changes, truncated } = changesSince(state, expected);
+  logActivity(state, "stale_write", `Agent write rejected — floor changed (v${expected} → v${state.floorVersion})${options.tool ? ` · ${options.tool}` : ""}`, "agent");
+  return {
+    ok: false,
+    error: {
+      code: "STALE_STATE",
+      message: `Floor changed since version ${expected}.`,
+      currentVersion: state.floorVersion,
+      changes,
+      ...(truncated ? { truncated: true } : {})
+    }
+  };
 }
 
 export function logActivity(state, tool, detail, source = "agent") {
@@ -500,6 +560,7 @@ function seatPartyAtTable(state, party, table, source, options = {}) {
     priorityBypassed
   };
   state.seatingRecords.push(record);
+  recordChange(state, "assignment", { partyId: party.id, tableId: table.id, by: changeOwner(source), detail: `${party.name} seated at ${table.id}` });
   state.coversHistory.push({ minute: state.now, covers: party.size });
   state.scoreHistory.push({ minute: state.now, sat: scored.sat });
   state.scoreHistory = state.scoreHistory.slice(-20);
@@ -547,6 +608,7 @@ export function assignTable(state, partyId, tableId, options = {}) {
     party.assignedBy = source;
     party.assignmentOrigin = clone(assignmentOrigin);
     party.assignmentReason = assignmentReason;
+    recordChange(state, "commitment", { partyId: party.id, tableId: table.id, by: changeOwner(source), detail: `${table.id} committed next to ${party.name}` });
     logActivity(state, "assign_table", `${table.id} held next for ${party.name} · ${assignmentOrigin.label} · ${assignmentReason}`, source);
   }
 
@@ -601,6 +663,7 @@ export function unassignParty(state, partyId, options = {}) {
   party.committedTableId = null;
   clearCandidatePlan(party);
   party.hostOverrideTableId = null;
+  recordChange(state, "unassign", { partyId: party.id, tableId: table?.id ?? null, by: changeOwner(options.source || "agent"), detail: `${party.name} returned to the queue` });
   logActivity(state, "unassign", `${party.name} returned to the queue`, options.source || "agent");
   requestAgentReview(state, "party returned to queue");
   return success(state, { partyId });
@@ -634,6 +697,7 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
     party.autoAssignAt = Math.max(state.now, Math.round(deadline));
   }
   if (party.status === "upcoming") party.autoAssignAt = null;
+  recordChange(state, "plan", { partyId: party.id, tableId: uniqueIds[0], by: changeOwner(source), detail: `${party.name} planned for ${uniqueIds.join(" · ")}` });
   logActivity(state, "set_candidates", `${party.name} → ${uniqueIds.join(" · ")}`, source);
   if (state.controllerMode === "external" && source === "agent") {
     state.agentReview.status = "planned";
@@ -669,6 +733,7 @@ export function lockTable(state, tableId, reason = "Host hold", options = {}) {
   table.locked = true;
   table.lockedBy = options.source || "host";
   table.lockReason = reason;
+  recordChange(state, "lock", { tableId: table.id, by: changeOwner(options.source || "host"), detail: `${table.id} locked · ${reason}` });
   logActivity(state, "lock_table", `${table.id} · ${reason}`, options.source || "host");
   requestAgentReview(state, "table lock changed");
   return success(state, { tableId, locked: true });
@@ -682,6 +747,7 @@ export function unlockTable(state, tableId, options = {}) {
   table.locked = false;
   table.lockedBy = null;
   table.lockReason = null;
+  recordChange(state, "unlock", { tableId: table.id, by: changeOwner(source), detail: `${table.id} unlocked` });
   logActivity(state, "unlock_table", table.id, source);
   requestAgentReview(state, "table lock changed");
   return success(state, { tableId, locked: false });
@@ -715,6 +781,7 @@ export function holdTable(state, tableId, partyId, until, options = {}) {
   } else {
     return failure(state, "TABLE_COMMITTED", `${table.id} already has a next party.`);
   }
+  recordChange(state, "hold", { partyId: party.id, tableId: table.id, by: changeOwner(source), detail: `${table.id} held for ${party.name} until ${minutesToTime(until)}` });
   logActivity(state, "hold_table", `${table.id} → ${party.name} until ${minutesToTime(until)}`, source);
   requestAgentReview(state, "table hold changed");
   return success(state, { tableId, partyId, until: Math.round(until) });
@@ -727,6 +794,7 @@ export function releaseHold(state, tableId, options = {}) {
   table.heldForPartyId = null;
   table.holdUntil = null;
   table.nextPartyId = null;
+  recordChange(state, "release", { tableId: table.id, by: changeOwner(options.source || "agent"), detail: `${table.id} hold released` });
   logActivity(state, "release_hold", table.id, options.source || "agent");
   requestAgentReview(state, "table hold released");
   return success(state, { tableId });
@@ -768,6 +836,7 @@ export function markTable(state, tableId, status, options = {}) {
   } else if (!table.partyId) {
     return failure(state, "PARTY_REQUIRED", "A party must be assigned before marking a table seated.");
   }
+  recordChange(state, "table_status", { tableId: table.id, by: changeOwner(options.source || "agent"), detail: `${table.id} marked ${table.status}` });
   logActivity(state, "mark_table", `${table.id} → ${table.status}`, options.source || "agent");
   requestAgentReview(state, "table readiness changed");
   return success(state, { tableId, status: table.status });
@@ -805,6 +874,7 @@ export function markParty(state, partyId, status, options = {}) {
     party.committedTableId = null;
     party.leftAt = state.now;
   }
+  recordChange(state, "party_status", { partyId: party.id, by: changeOwner(options.source || "agent"), detail: `${party.name} marked ${status}` });
   logActivity(state, "mark_party", `${party.name} → ${status}`, options.source || "agent");
   requestAgentReview(state, `party marked ${status}`);
   return success(state, { partyId, status: party.status });
@@ -826,6 +896,7 @@ export function addHostNote(state, partyId, text, options = {}) {
   } else {
     party.request = { id: `note-${party.id}`, template: null, category: null, text: clean, source: "host", ground: null, hostNotes: [clean] };
   }
+  recordChange(state, "request", { partyId: party.id, by: changeOwner(options.source || "host"), detail: `Host note added for ${party.name}` });
   logActivity(state, "add_host_note", `${party.name} · ${clean}`, options.source || "host");
   requestAgentReview(state, "host note added");
   return success(state, { partyId, request: { text: party.request.text, source: party.request.source } });
@@ -847,6 +918,7 @@ export function setPartyMarks(state, partyId, marks = {}, options = {}) {
     }
   }
   const visible = entries.filter(([key]) => key !== "discreet").map(([key, value]) => `${key} ${value ? "on" : "off"}`);
+  recordChange(state, "marks", { partyId: party.id, by: changeOwner(options.source || "agent"), detail: `${party.name} marks updated` });
   logActivity(state, "mark_party", `${party.name} · ${visible.length ? visible.join(" · ") : "note recorded"}`, options.source || "agent");
   requestAgentReview(state, "party marks changed");
   return success(state, { partyId, marks: clone(party.marks) });
@@ -912,6 +984,7 @@ function processTableTransitions(state) {
       table.dirtyUntil = state.now + TABLE_RESET_MINUTES;
       table.assignmentOrigin = null;
       table.assignmentReason = null;
+      recordChange(state, "table_status", { tableId: table.id, partyId: party?.id ?? null, detail: `${table.id} turned dirty` });
       logActivity(state, "mark_table", `${table.id} → dirty`, "clock");
       changed = true;
     }
@@ -920,6 +993,7 @@ function processTableTransitions(state) {
       table.dirtyUntil = null;
       table.assignmentOrigin = null;
       table.assignmentReason = null;
+      recordChange(state, "table_status", { tableId: table.id, detail: `${table.id} ready` });
       logActivity(state, "mark_table", `${table.id} → ready`, "clock");
       seatCommittedPartyIfReady(state, table);
       changed = true;
@@ -936,6 +1010,7 @@ function processTableTransitions(state) {
         table.status = "free";
         table.heldForPartyId = null;
         table.holdUntil = null;
+        recordChange(state, "release", { tableId: table.id, detail: `${table.id} hold expired` });
         logActivity(state, "release_hold", `${table.id} · hold expired`, "clock");
       }
       changed = true;
@@ -961,6 +1036,7 @@ function processEvent(state, event) {
       const arrivalDetail = party.size > previousSize
         ? `${party.name} arrived · party grew ${previousSize} → ${party.size}`
         : `${party.name} arrived · party of ${party.size}`;
+      recordChange(state, "arrival", { partyId: party.id, detail: arrivalDetail });
       logActivity(state, "get_queue", arrivalDetail, "clock");
       changed = true;
     }
@@ -974,6 +1050,7 @@ function processEvent(state, event) {
       party.hostOverrideTableId = null;
       releasePartyHolds(state, party);
       state.disruptions.push({ type: "no_show", at: state.now, partyId: party.id, detail: `${party.name} did not show for ${minutesToTime(party.reservedFor)}`, resolved: true });
+      recordChange(state, "party_status", { partyId: party.id, detail: `${party.name} no-show` });
       logActivity(state, "mark_party", `${party.name} → no-show`, "clock");
       changed = true;
     }
@@ -981,6 +1058,7 @@ function processEvent(state, event) {
   if (event.type === "kitchen_delay") {
     state.kitchenDelayUntil = event.until;
     state.disruptions.push({ type: "kitchen_delay", at: state.now, partyId: null, detail: `Kitchen delay through ${minutesToTime(event.until)}`, until: event.until, resolved: false });
+    recordChange(state, "kitchen", { detail: `Kitchen delay through ${minutesToTime(event.until)}` });
     logActivity(state, "get_floor", `Kitchen delay through ${minutesToTime(event.until)}`, "clock");
     changed = true;
   }
@@ -1003,6 +1081,7 @@ function processEvent(state, event) {
         ? `${party.name} confirmed ${party.size}`
         : `${party.name} confirmed ${previousSize} → ${party.size}`;
       state.disruptions.push({ type: "party_size_change", at: state.now, partyId: party.id, detail, resolved: false });
+      recordChange(state, "party_update", { partyId: party.id, detail });
       logActivity(state, "party_update", detail, "clock");
       changed = true;
     }
@@ -1067,6 +1146,15 @@ export function advanceTo(state, targetMinute) {
   return success(state, { now: state.now });
 }
 
+export function jumpClock(state, targetMinute, options = {}) {
+  const from = state.now;
+  const result = advanceTo(state, targetMinute);
+  if (result.ok && state.now !== from) {
+    recordChange(state, "clock", { by: changeOwner(options.source || "host"), detail: `Clock jumped ${minutesToTime(from)} → ${minutesToTime(state.now)}` });
+  }
+  return result;
+}
+
 export function getNextEventMinute(state) {
   const scripted = state.events.find((event) => event.minute > state.now)?.minute;
   const tableTimes = state.tables.flatMap((table) => [table.dueAt, table.dirtyUntil, table.holdUntil]).filter((minute) => minute != null && minute > state.now);
@@ -1105,8 +1193,14 @@ export function attachExternalAgent(state, name, mode = "autonomous") {
     changedPartyCount: 0
   };
   state.plan = `${cleanName} is attached through WebMCP in ${mode} mode and is reading the floor.`;
+  recordChange(state, "agent", { by: "AI", detail: `${cleanName} attached (${mode})` });
   logActivity(state, "attach_agent", `${cleanName} · ${mode}`, "agent");
-  return success(state, { controllerMode: state.controllerMode, agent: clone(state.agentConnection) });
+  return success(state, {
+    controllerMode: state.controllerMode,
+    agent: clone(state.agentConnection),
+    floorVersion: state.floorVersion,
+    concurrency: `The floor is at version ${state.floorVersion}. Pass expected_version from your last get_floor, get_queue, or write result on every write; a mismatch returns STALE_STATE with the changes you missed.`
+  });
 }
 
 export function detachExternalAgent(state, options = {}) {
@@ -1119,6 +1213,7 @@ export function detachExternalAgent(state, options = {}) {
   }
   state.agentReview = manualReview();
   state.plan = "External agent disconnected. The floor is in manual mode.";
+  recordChange(state, "agent", { by: changeOwner(options.source || "agent"), detail: `${previous} detached` });
   logActivity(state, "detach_agent", `${previous} disconnected`, options.source || "agent");
   return success(state, { controllerMode: state.controllerMode });
 }
@@ -1585,13 +1680,15 @@ function nextRecommendedActions(state) {
   const base = state.agentReview.status === "review_due"
     ? ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason that says how the plan honors any special request", "Explain the current whole-floor plan"]
     : ["Keep tentative tables current for parties inside the 45-minute horizon", "Re-read get_floor after every write"];
-  return [...upcomingRequests, ...base];
+  return [...upcomingRequests, ...base, `Pass expected_version: ${state.floorVersion} on your next write so a host change is never clobbered`];
 }
 
 export function getFloorSnapshot(state) {
   return {
     clock: minutesToTime(state.now),
     minute: state.now,
+    floorVersion: state.floorVersion,
+    recentChanges: state.changeLog.slice(-10),
     running: state.running,
     speed: state.speed,
     runCode: state.runCode,
@@ -1668,6 +1765,7 @@ export function getFloorSnapshot(state) {
 export function getQueueSnapshot(state) {
   return {
     clock: minutesToTime(state.now),
+    floorVersion: state.floorVersion,
     servicePolicy: {
       order: ["waiting_reservation", "waiting_walk_in"],
       rule: "Seat a waiting reservation first whenever a legal table is available.",
