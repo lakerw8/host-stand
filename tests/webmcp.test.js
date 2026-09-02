@@ -5,7 +5,7 @@ import { createInitialState } from "../src/engine.js";
 import { createToolDefinitions, executeToolDefinition, validateToolInput } from "../src/webmcp.js";
 
 function createHarness() {
-  const state = createInitialState({ agentEnabled: false, preferenceSeed: "webmcp-contract" });
+  const state = createInitialState({ preferenceSeed: "webmcp-contract" });
   let changes = 0;
   const clock = {
     pause() { state.running = false; },
@@ -80,6 +80,9 @@ test("an external agent can plan, mutate, verify, and recover through tools only
 
   const score = await execute("score_assignment", { party_id: "patel", table_id: "V1" });
   assert.equal(score.legal, true);
+  const ranked = await execute("score_assignment", { party_id: "patel" });
+  assert.ok(ranked.ranked.length >= 1 && ranked.ranked.length <= 8);
+  assert.ok(ranked.ranked.every((entry) => entry.legal && typeof entry.tableId === "string"));
   assert.equal((await execute("set_candidates", { party_id: "patel", table_ids: ["V1", "V2"] })).ok, true);
   assert.equal((await execute("assign_table", { party_id: "patel", table_id: "V1" })).seated, true);
 
@@ -108,7 +111,6 @@ test("an external AI can attach explicitly and own autonomous candidate deadline
   const attached = await execute("attach_agent", { agent_name: "Table Pilot", mode: "autonomous" });
   assert.equal(attached.ok, true);
   assert.equal(state.controllerMode, "external");
-  assert.equal(state.agentEnabled, false);
   assert.equal(state.agentConnection.name, "Table Pilot");
 
   await execute("set_clock", { time: "6:00 PM", running: false });

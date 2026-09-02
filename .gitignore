@@ -24,3 +24,6 @@ AGENTS.md
 .idea/
 .vscode/
 *.swp
+
+# Claude Code local launch config
+.claude/

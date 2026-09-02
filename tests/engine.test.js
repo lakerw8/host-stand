@@ -8,8 +8,10 @@ import {
   TABLE_RESET_MINUTES,
   advanceTo,
   assignTable,
+  attachExternalAgent,
   checkAssignmentLegality,
   createInitialState,
+  detachExternalAgent,
   elapsedToSimMinutes,
   getFloorSnapshot,
   getMetrics,
@@ -18,13 +20,14 @@ import {
   getServiceRecap,
   getTable,
   lockTable,
-  runAgentCycle,
+  rankCandidateTables,
   scoreAssignment,
   setCandidates,
   setHostCandidateOverride,
   setWeights
 } from "../src/engine.js";
 import { EXPECTED_DWELL_MINUTES, FIRST_SEATING, PARTY_SIZE_DISTRIBUTION, PREFERENCE_KEYS, RESTAURANT_CAPACITY, SERVICE_END, SERVICE_START, TABLE_DEFINITIONS, TABLE_UNIT_COUNT } from "../src/data.js";
+import { runReferenceAgent } from "./helpers/reference-agent.js";
 
 test("the expanded restaurant inventory is exactly 120 seats", () => {
   assert.equal(RESTAURANT_CAPACITY, 120);
@@ -36,25 +39,37 @@ test("the expanded restaurant inventory is exactly 120 seats", () => {
   );
 });
 
-test("service waits at 5:00 PM until Start is pressed and ends at 10:00 PM", () => {
+test("service waits at 5:00 PM in manual mode until Start is pressed and ends at 10:00 PM", () => {
   const state = createInitialState();
   assert.equal(state.now, SERVICE_START);
   assert.equal(SERVICE_START, 17 * 60);
   assert.equal(SERVICE_END, 22 * 60);
   assert.equal(state.running, false);
-  assert.ok(getParty(state, "patel").candidateTableIds.length >= 1);
+  assert.equal(state.controllerMode, "manual");
+  assert.equal(state.agentConnection, null);
+  assert.ok(state.parties.every((party) => party.candidateTableIds.length === 0));
 });
 
-test("upcoming reservations receive forecast tables while manual mode stays suggestion-free", () => {
-  const agentState = createInitialState();
-  assert.ok(getParty(agentState, "patel").candidateTableIds.length >= 1);
-  assert.equal(getParty(agentState, "patel").autoAssignAt, null);
-  assert.equal(getParty(agentState, "patel").candidateState, "tentative");
-  assert.deepEqual(getParty(agentState, "rossi").candidateTableIds, []);
+test("only two operating modes exist: manual host and an attached agent", () => {
+  const state = createInitialState();
+  assert.deepEqual(getParty(state, "patel").candidateTableIds, []);
   assert.equal(AGENT_PLANNING_HORIZON_MINUTES, 45);
 
-  const manualState = createInitialState({ agentEnabled: false });
-  assert.deepEqual(getParty(manualState, "patel").candidateTableIds, []);
+  assert.equal(attachExternalAgent(state, "Table Pilot", "autonomous").ok, true);
+  assert.equal(state.controllerMode, "external");
+  assert.equal(state.agentReview.status, "review_due");
+  assert.equal(setCandidates(state, "patel", ["V1", "V2"], null, { source: "agent", reason: "Window 2-top for the anniversary." }).ok, true);
+  assert.equal(getParty(state, "patel").candidateState, "tentative");
+  assert.equal(getParty(state, "patel").autoAssignAt, null);
+
+  getParty(state, "brooks").status = "waiting";
+  assert.equal(assignTable(state, "brooks", "D2", { source: "agent" }).ok, true);
+
+  assert.equal(detachExternalAgent(state).ok, true);
+  assert.equal(state.controllerMode, "manual");
+  assert.deepEqual(getParty(state, "patel").candidateTableIds, []);
+  assert.equal(getParty(state, "brooks").status, "seated");
+  assert.equal(getTable(state, "D2").partyId, "brooks");
 });
 
 test("party preferences are seeded-random, unique, and span zero through three", () => {
@@ -94,7 +109,7 @@ test("random service runs replay by seed and vary parties, timing, constraints, 
 });
 
 test("the seating brief changes table scoring with an explicit operational reason", () => {
-  const state = createInitialState({ agentEnabled: false, preferenceSeed: "brief-scoring" });
+  const state = createInitialState({ preferenceSeed: "brief-scoring" });
   const directive = state.serviceBrief.directives.find((entry) => entry.type === "section_load");
   const party = getParty(state, "brooks");
   party.status = "waiting";
@@ -110,7 +125,7 @@ test("the seating brief changes table scoring with an explicit operational reaso
 });
 
 test("the seating brief rewards keeping linked parties nearby", () => {
-  const state = createInitialState({ agentEnabled: false, preferenceSeed: "brief-proximity-scoring" });
+  const state = createInitialState({ preferenceSeed: "brief-proximity-scoring" });
   const directive = state.serviceBrief.directives.find((entry) => entry.type === "party_proximity");
   const [targetPartyId, companionPartyId] = directive.partyIds;
   const targetParty = getParty(state, targetPartyId);
@@ -155,16 +170,13 @@ test("random nights normalize party sizes around mostly two-tops and four-tops",
   }
 });
 
-test("busy random nights reach at least 80 percent table-seat utilization", () => {
-  for (let index = 0; index < 12; index += 1) {
+test("busy random nights offer enough demand for a simple agent to reach 80 percent seat utilization", () => {
+  for (let index = 0; index < 8; index += 1) {
     const state = createInitialState({ scenarioSeed: `peak-capacity-${index}`, randomizeScenario: true });
-    let peakUtilization = getMetrics(state).utilization;
-
-    for (let minute = SERVICE_START + 1; minute <= SERVICE_END; minute += 1) {
-      advanceTo(state, minute);
-      peakUtilization = Math.max(peakUtilization, getMetrics(state).utilization);
-    }
-
+    let peakUtilization = 0;
+    runReferenceAgent(state, SERVICE_END, {
+      onMinute: (current) => { peakUtilization = Math.max(peakUtilization, getMetrics(current).utilization); }
+    });
     assert.ok(
       peakUtilization >= 0.8,
       `${state.runCode} only reached ${Math.round(peakUtilization * 100)}% utilization`
@@ -178,79 +190,97 @@ test("service clock maps real seconds to restaurant minutes at 1x, 2x, and 5x", 
   assert.equal(elapsedToSimMinutes(1000, 5), 5);
 });
 
-test("pre-planned reservations commit their tentative tables when they arrive", () => {
+test("an autonomous agent's tentative tables commit when the reservations arrive", () => {
   const state = createInitialState();
-  const patelPlan = getParty(state, "patel").candidateTableIds[0];
-  const nguyenPlan = getParty(state, "nguyen").candidateTableIds[0];
+  attachExternalAgent(state, "Table Pilot", "autonomous");
+  assert.equal(setCandidates(state, "patel", ["V1"], null, { source: "agent", reason: "Window 2-top." }).ok, true);
+  assert.equal(setCandidates(state, "nguyen", ["D1"], null, { source: "agent", reason: "Right-sized 4-top." }).ok, true);
   const result = advanceTo(state, FIRST_SEATING);
 
   assert.equal(result.ok, true);
   assert.equal(getParty(state, "patel").status, "seated");
   assert.equal(getParty(state, "nguyen").status, "seated");
-  assert.equal(getParty(state, "patel").committedTableId, patelPlan);
-  assert.equal(getParty(state, "nguyen").committedTableId, nguyenPlan);
-  assert.notEqual(patelPlan, nguyenPlan);
+  assert.equal(getParty(state, "patel").committedTableId, "V1");
+  assert.equal(getParty(state, "nguyen").committedTableId, "D1");
+  assert.deepEqual(getTable(state, "V1").assignmentOrigin, { kind: "external", label: "Table Pilot" });
 });
 
-test("an arrived walk-in receives live table suggestions", () => {
+test("an advisory agent's tentative tables wait for the host instead of executing", () => {
+  const state = createInitialState();
+  attachExternalAgent(state, "Advisor", "advisory");
+  assert.equal(setCandidates(state, "patel", ["V1"], null, { source: "agent" }).ok, true);
+  advanceTo(state, FIRST_SEATING);
+  assert.equal(getParty(state, "patel").status, "waiting");
+  assert.deepEqual(getParty(state, "patel").candidateTableIds, ["V1"]);
+});
+
+test("an arrived walk-in in manual mode waits for the host with no suggestions", () => {
   const state = createInitialState();
   advanceTo(state, FIRST_SEATING + 12);
 
   const lee = getParty(state, "lee");
   assert.equal(lee.status, "waiting");
-  assert.ok(lee.candidateTableIds.length >= 1);
-  assert.equal(lee.autoAssignAt, FIRST_SEATING + 12 + AGENT_FREEZE_WINDOW_MINUTES);
+  assert.deepEqual(lee.candidateTableIds, []);
+  assert.equal(lee.autoAssignAt, null);
 });
 
-test("the local agent reviews every ten restaurant minutes when no event intervenes", () => {
+test("an attached agent is asked to review every ten restaurant minutes when no event intervenes", () => {
   const state = createInitialState();
-  assert.equal(state.agentReview.lastReviewAt, SERVICE_START);
+  attachExternalAgent(state, "Table Pilot", "autonomous");
   assert.equal(state.agentReview.nextReviewAt, SERVICE_START + AGENT_HEARTBEAT_MINUTES);
+  setCandidates(state, "patel", ["V1"], null, { source: "agent" });
+  assert.equal(state.agentReview.status, "planned");
 
   advanceTo(state, SERVICE_START + AGENT_HEARTBEAT_MINUTES);
 
-  assert.equal(state.agentReview.lastReviewAt, SERVICE_START + AGENT_HEARTBEAT_MINUTES);
+  assert.equal(state.agentReview.status, "review_due");
   assert.equal(state.agentReview.reason, "10-minute heartbeat");
-  assert.ok(state.activity.some((entry) => entry.tool === "review_floor" && entry.detail.includes("10-minute heartbeat")));
 });
 
-test("the agent sends a no-preference 2-top to a fast-turn zone instead of spending the view", () => {
+test("the scoring service ranks a fast-turn zone first for a no-preference 2-top", () => {
   const state = createInitialState();
-  advanceTo(state, FIRST_SEATING + 12 + AGENT_FREEZE_WINDOW_MINUTES);
+  advanceTo(state, FIRST_SEATING + 12);
 
   const lee = getParty(state, "lee");
-  const table = getTable(state, lee.committedTableId);
-  assert.equal(lee.status, "seated");
-  assert.ok(["kitchen", "counter"].includes(table.zone), `Lee was assigned to ${table.id} in ${table.zone}`);
+  assert.deepEqual(lee.preferences, []);
+  const ranked = rankCandidateTables(state, lee.id);
+  assert.ok(ranked.length >= 1);
+  assert.ok(["kitchen", "counter"].includes(ranked[0].zone), `Lee's top table was ${ranked[0].tableId} in ${ranked[0].zone}`);
+  assert.ok(ranked.every((entry) => entry.legal));
 });
 
-test("a host tentative-table override remains fixed and commits at reservation arrival", () => {
+test("a host tentative-table override remains fixed and commits as a host decision at arrival", () => {
   const state = createInitialState();
+  attachExternalAgent(state, "Table Pilot", "advisory");
+  setCandidates(state, "patel", ["V2"], null, { source: "agent" });
   const override = setHostCandidateOverride(state, "patel", "V1");
 
   assert.equal(override.ok, true);
   assert.equal(getParty(state, "patel").hostOverrideTableId, "V1");
   assert.equal(getParty(state, "patel").candidateTableIds[0], "V1");
   assert.equal(getParty(state, "patel").candidateState, "host_override");
+  assert.equal(setCandidates(state, "patel", ["V2"], null, { source: "agent" }).error.code, "HOST_OVERRIDE_ACTIVE");
 
   advanceTo(state, FIRST_SEATING);
   assert.equal(getParty(state, "patel").committedTableId, "V1");
-  assert.equal(getParty(state, "patel").assignedBy, "agent");
+  assert.equal(getParty(state, "patel").assignedBy, "host");
+  assert.equal(getTable(state, "V1").assignmentOrigin.kind, "host");
 });
 
-test("a floor event triggers an immediate full review between heartbeats", () => {
+test("a floor event asks the attached agent for an immediate review between heartbeats", () => {
   const state = createInitialState();
-  const previousTop = getParty(state, "patel").candidateTableIds[0];
-  const result = lockTable(state, previousTop, "Host photo setup", { source: "host" });
+  attachExternalAgent(state, "Table Pilot", "autonomous");
+  setCandidates(state, "patel", ["V1"], null, { source: "agent" });
+  const result = lockTable(state, "V1", "Host photo setup", { source: "host" });
 
   assert.equal(result.ok, true);
+  assert.equal(state.agentReview.status, "review_due");
   assert.equal(state.agentReview.reason, "table lock changed");
-  assert.notEqual(getParty(state, "patel").candidateTableIds[0], previousTop);
-  assert.equal(state.agentReview.nextReviewAt, state.now + AGENT_HEARTBEAT_MINUTES);
+  assert.equal(checkAssignmentLegality(state, "patel", "V1", { forCandidate: true, allowUpcoming: true }).legal, false);
 });
 
 test("manual mode never auto-assigns, while host assignment remains available", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   advanceTo(state, FIRST_SEATING + 8);
   assert.equal(getParty(state, "patel").status, "waiting");
   assert.deepEqual(getParty(state, "patel").candidateTableIds, []);
@@ -262,7 +292,7 @@ test("manual mode never auto-assigns, while host assignment remains available", 
 });
 
 test("automated seating honors an available reservation before a walk-in, while the host can override", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   const reservation = getParty(state, "patel");
   const walkIn = getParty(state, "diaz");
   reservation.status = "waiting";
@@ -283,7 +313,7 @@ test("automated seating honors an available reservation before a walk-in, while 
 });
 
 test("walk-in automation resumes after the available reservation is seated", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   const reservation = getParty(state, "patel");
   const walkIn = getParty(state, "diaz");
   reservation.status = "waiting";
@@ -294,26 +324,27 @@ test("walk-in automation resumes after the available reservation is seated", () 
   assert.equal(assignTable(state, walkIn.id, "R1", { source: "agent" }).ok, true);
 });
 
-test("the local agent commits simultaneous deadlines in reservation-first order", () => {
+test("an autonomous agent's simultaneous deadlines commit in reservation-first order", () => {
   const state = createInitialState();
   state.now = FIRST_SEATING;
+  attachExternalAgent(state, "Table Pilot", "autonomous");
   const reservation = getParty(state, "patel");
   const walkIn = getParty(state, "diaz");
   reservation.status = "waiting";
   walkIn.status = "waiting";
 
-  runAgentCycle(state, { reason: "reservation priority test", allowAutoCommit: false });
-  assert.ok(reservation.autoAssignAt <= walkIn.autoAssignAt);
+  assert.equal(setCandidates(state, walkIn.id, ["R1"], state.now + AGENT_FREEZE_WINDOW_MINUTES, { source: "agent" }).ok, true);
+  assert.equal(setCandidates(state, reservation.id, ["V1"], state.now + AGENT_FREEZE_WINDOW_MINUTES, { source: "agent" }).ok, true);
   assert.equal(walkIn.autoAssignAt, state.now + AGENT_FREEZE_WINDOW_MINUTES);
 
-  advanceTo(state, Math.max(reservation.autoAssignAt, walkIn.autoAssignAt));
+  advanceTo(state, state.now + AGENT_FREEZE_WINDOW_MINUTES);
   assert.equal(state.seatingRecords[0].partyId, reservation.id);
   assert.equal(reservation.status, "seated");
   assert.equal(walkIn.status, "seated");
 });
 
 test("children make non-high-chair tables illegal for agent and host", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   advanceTo(state, FIRST_SEATING + 18);
 
   for (const tableId of ["B3", "B4", "S5", "C1", "C6"]) {
@@ -325,7 +356,7 @@ test("children make non-high-chair tables illegal for agent and host", () => {
 });
 
 test("candidate sets reject an illegal child seating before publication", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   advanceTo(state, FIRST_SEATING + 18);
 
   const result = setCandidates(state, "haddad", ["B3", "V3"], state.now + 3, { source: "agent" });
@@ -334,8 +365,8 @@ test("candidate sets reject an illegal child seating before publication", () => 
   assert.deepEqual(getParty(state, "haddad").candidateTableIds, []);
 });
 
-test("a host lock is a hard constraint and forces candidate reflow", () => {
-  const state = createInitialState({ agentEnabled: false });
+test("a host lock is a hard constraint for host and agent alike", () => {
+  const state = createInitialState();
   advanceTo(state, FIRST_SEATING);
   lockTable(state, "V1", "Anniversary photo setup", { source: "host" });
 
@@ -346,7 +377,7 @@ test("a host lock is a hard constraint and forces candidate reflow", () => {
 });
 
 test("accessibility requirement filters every unmarked table", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   const party = getParty(state, "cohen");
   party.status = "waiting";
   party.needsAccessible = true;
@@ -357,7 +388,7 @@ test("accessibility requirement filters every unmarked table", () => {
 });
 
 test("a party of three can be seated at a four-seat table", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   const party = getParty(state, "cohen");
   party.status = "waiting";
 
@@ -367,7 +398,7 @@ test("a party of three can be seated at a four-seat table", () => {
 });
 
 test("host can override the private-room minimum but not table capacity", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   const brooks = getParty(state, "brooks");
   brooks.status = "waiting";
 
@@ -392,7 +423,7 @@ test("weight changes must total one and are stored for the next solve", () => {
 });
 
 test("a departed party leaves a table dirty for exactly three minutes", () => {
-  const state = createInitialState({ agentEnabled: false });
+  const state = createInitialState();
   const party = getParty(state, "patel");
   party.status = "waiting";
   const seated = assignTable(state, "patel", "V1", { source: "host" });
@@ -419,15 +450,20 @@ test("a departed party leaves a table dirty for exactly three minutes", () => {
   assert.equal(getTable(state, "V1").status, "free");
 });
 
-test("assignment provenance and the end-of-service recap are auditable", () => {
-  const state = createInitialState({ agentEnabled: false });
+test("assignment provenance is HOST or AI only and the end-of-service recap is auditable", () => {
+  const state = createInitialState();
   const party = getParty(state, "patel");
   party.status = "waiting";
   const result = assignTable(state, party.id, "V1", { source: "host", reason: "Keep the reservation near the window." });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(getTable(state, "V1").assignmentOrigin, { kind: "host", label: "Host override" });
+  assert.deepEqual(getTable(state, "V1").assignmentOrigin, { kind: "host", label: "Host" });
   assert.equal(getTable(state, "V1").assignmentReason, "Keep the reservation near the window.");
+
+  attachExternalAgent(state, "Table Pilot", "autonomous");
+  getParty(state, "brooks").status = "waiting";
+  assert.equal(assignTable(state, "brooks", "D2", { source: "agent", reason: "Right-sized 2-top." }).ok, true);
+  assert.deepEqual(getTable(state, "D2").assignmentOrigin, { kind: "external", label: "Table Pilot" });
 
   advanceTo(state, SERVICE_END);
   const recap = getServiceRecap(state);
@@ -436,6 +472,7 @@ test("assignment provenance and the end-of-service recap are auditable", () => {
   assert.ok(recap.score >= 0 && recap.score <= 100);
   assert.equal(recap.components.length, 5);
   assert.equal(recap.briefResults.length, 2);
+  assert.deepEqual(recap.provenance.map((origin) => origin.kind).sort(), ["external", "host"]);
   assert.equal(recap.provenance.find((origin) => origin.kind === "host").assignments, 1);
   assert.equal(getFloorSnapshot(state).serviceRecap.score, recap.score);
 });

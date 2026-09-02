@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { advanceTo, checkAssignmentLegality, createInitialState, getParty } from "../src/engine.js";
+import { advanceTo, attachExternalAgent, checkAssignmentLegality, createInitialState, getParty, rankCandidateTables } from "../src/engine.js";
 
 // Regression: ISSUE-002 — generated parties never changed size when they checked in.
 // Found by /qa on 2026-08-31.
@@ -17,15 +17,18 @@ test("a seeded ten-percent cohort grows by one at check-in and triggers legal re
   assert.equal(party.size, 1);
   assert.equal(party.checkInSizeDelta, 1);
 
+  attachExternalAgent(state, "Reference agent", "autonomous");
   advanceTo(state, arrival.minute);
 
   assert.equal(party.status, "waiting");
   assert.equal(party.size, 2);
   assert.equal(party.checkInSizeDelta, 0);
-  assert.equal(state.agentReview.reason, "arrival");
+  assert.equal(state.agentReview.status, "review_due");
+  assert.match(state.agentReview.reason, /arrival/);
   assert.ok(state.activity.some((entry) => entry.detail === "Silva arrived · party grew 1 → 2"));
-  assert.ok(party.candidateTableIds.length >= 1);
-  assert.ok(party.candidateTableIds.every((tableId) => (
-    checkAssignmentLegality(state, party.id, tableId, { forCandidate: true, source: "agent" }).legal
+  const ranked = rankCandidateTables(state, party.id);
+  assert.ok(ranked.length >= 1);
+  assert.ok(ranked.every((entry) => (
+    checkAssignmentLegality(state, party.id, entry.tableId, { forCandidate: true, source: "agent" }).legal
   )));
 });

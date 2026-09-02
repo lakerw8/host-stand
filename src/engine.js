@@ -22,7 +22,6 @@ const clamp = (value, minimum = 0, maximum = 1) => Math.min(maximum, Math.max(mi
 export const AGENT_HEARTBEAT_MINUTES = 10;
 export const AGENT_PLANNING_HORIZON_MINUTES = 45;
 export const AGENT_FREEZE_WINDOW_MINUTES = 5;
-export const AGENT_STABILITY_THRESHOLD = 0.1;
 export const TABLE_RESET_MINUTES = 3;
 
 const runtimeTable = (definition) => ({
@@ -61,6 +60,16 @@ const runtimeParty = (definition) => ({
   seatingScore: null
 });
 
+const manualReview = () => ({
+  status: "manual",
+  reason: "manual control",
+  lastReviewAt: null,
+  nextReviewAt: null,
+  requestedAt: null,
+  plannedPartyCount: 0,
+  changedPartyCount: 0
+});
+
 export function createInitialState(options = {}) {
   const scenarioSeed = options.scenarioSeed ?? options.preferenceSeed ?? "host-stand-saturday";
   const scriptedParties = options.randomizeScenario ? null : createNightParties(scenarioSeed);
@@ -73,23 +82,13 @@ export function createInitialState(options = {}) {
         seed: String(scenarioSeed),
         runCode: "SATURDAY"
       };
-  const agentEnabled = options.agentEnabled ?? true;
   const state = {
     now: SERVICE_START,
     running: options.running ?? false,
     speed: options.speed ?? 1,
-    agentEnabled,
-    controllerMode: agentEnabled ? "local" : "manual",
+    controllerMode: "manual",
     agentConnection: null,
-    agentReview: {
-      status: agentEnabled ? "reviewing" : "manual",
-      reason: agentEnabled ? "opening plan" : "manual control",
-      lastReviewAt: null,
-      nextReviewAt: agentEnabled ? SERVICE_START + AGENT_HEARTBEAT_MINUTES : null,
-      requestedAt: null,
-      plannedPartyCount: 0,
-      changedPartyCount: 0
-    },
+    agentReview: manualReview(),
     weights: { sat: 0.6, turn: 0.4 },
     tables: TABLE_DEFINITIONS.map(runtimeTable),
     parties: scenario.parties.map(runtimeParty),
@@ -108,15 +107,14 @@ export function createInitialState(options = {}) {
         source: "system"
       }
     ],
-    plan: "Doors open at 5:00. The floor is clear and the agent is watching the arrival book.",
-    planBullets: ["Seat waiting reservations before walk-ins when a legal table is available", "Respect host overrides as fixed", "Protect right-sized tables for the full service"],
+    plan: "Doors open at 5:00. The floor is clear. Seat arrivals by hand, or attach a browser agent through WebMCP.",
+    planBullets: ["The engine enforces legality, capacity, locks, and reservation priority", "An attached agent interprets special requests and explains its plans", "The host can override any plan"],
     seatingRecords: [],
     coversHistory: [],
     scoreHistory: [],
     lastError: null,
     revision: 0
   };
-  if (state.agentEnabled) runAgentCycle(state, { reason: "opening plan", log: false, allowAutoCommit: false });
   return state;
 }
 
@@ -334,27 +332,18 @@ export function scoreAssignment(state, partyId, tableId, options = {}) {
   };
 }
 
-function priorityValue(state, party) {
-  const lateReservation = party.source === "reservation" && state.now > party.reservedFor + 5 ? 10000 : 0;
-  const regular = party.isRegular ? 5000 : 0;
-  const origin = party.source === "walk_in" ? party.arrivedAt : party.reservedFor;
-  return lateReservation + regular + Math.max(0, state.now - origin);
-}
 
-function rankedCandidateScores(state, party) {
+export function rankCandidateTables(state, partyId, options = {}) {
+  const party = getParty(state, partyId);
+  if (!party) return [];
   return state.tables
-    .map((table) => ({ table, result: scoreAssignment(state, party.id, table.id, { forCandidate: true, allowUpcoming: true }) }))
+    .map((table) => ({ table, result: scoreAssignment(state, party.id, table.id, { forCandidate: true, allowUpcoming: true, source: options.source || "agent" }) }))
     .filter(({ result }) => result.legal)
-    .sort((left, right) => right.result.score - left.result.score || left.result.availabilityDelay - right.result.availabilityDelay || left.table.seats - right.table.seats);
+    .sort((left, right) => right.result.score - left.result.score || left.result.availabilityDelay - right.result.availabilityDelay || left.table.seats - right.table.seats)
+    .map(({ table, result }) => ({ tableId: table.id, seats: table.seats, zone: table.zone, ...result }));
 }
 
-function rankedCandidates(state, party) {
-  return rankedCandidateScores(state, party).slice(0, 3).map(({ table }) => table.id);
-}
 
-function partyPlanningMinute(state, party) {
-  return party.status === "upcoming" ? party.reservedFor : state.now;
-}
 
 function isInsidePlanningHorizon(state, party) {
   if (party.status === "waiting") return !party.committedTableId;
@@ -363,14 +352,6 @@ function isInsidePlanningHorizon(state, party) {
     && party.reservedFor <= state.now + AGENT_PLANNING_HORIZON_MINUTES;
 }
 
-function planningOrder(state, left, right) {
-  if (left.status !== right.status) return left.status === "waiting" ? -1 : 1;
-  if (left.status === "waiting") {
-    if (left.source !== right.source) return left.source === "reservation" ? -1 : 1;
-    return priorityValue(state, right) - priorityValue(state, left);
-  }
-  return left.reservedFor - right.reservedFor || priorityValue(state, right) - priorityValue(state, left);
-}
 
 function clearCandidatePlan(party) {
   party.candidateTableIds = [];
@@ -381,172 +362,14 @@ function clearCandidatePlan(party) {
   party.candidateReason = null;
 }
 
-function scheduledCandidateScores(state, party, tableAvailableAt) {
-  const targetMinute = partyPlanningMinute(state, party);
-  return rankedCandidateScores(state, party)
-    .map((entry) => {
-      const actualFreeAt = projectedFreeMinute(entry.table, state.now);
-      const scheduledFreeAt = Math.max(actualFreeAt, tableAvailableAt.get(entry.table.id) ?? state.now);
-      const plannedStart = Math.max(targetMinute, scheduledFreeAt);
-      const scheduleDelay = Math.max(0, plannedStart - Math.max(targetMinute, actualFreeAt));
-      return {
-        ...entry,
-        plannedStart,
-        planScore: clamp(entry.result.score - Math.min(0.4, scheduleDelay / 90))
-      };
-    })
-    .sort((left, right) => right.planScore - left.planScore || left.plannedStart - right.plannedStart || left.table.seats - right.table.seats);
-}
 
-function choosePrimaryCandidate(state, party, entries) {
-  const best = entries[0] || null;
-  if (!best) return null;
-  const previousTop = party.candidateTableIds[0] || null;
-  const previous = entries.find((entry) => entry.table.id === previousTop);
-  const hostOverride = party.hostOverrideTableId
-    ? entries.find((entry) => entry.table.id === party.hostOverrideTableId)
-    : null;
 
-  if (party.hostOverrideTableId && !hostOverride) {
-    party.hostOverrideTableId = null;
-  }
-  if (hostOverride) return hostOverride;
 
-  const insideFreezeWindow = party.status === "upcoming"
-    && party.reservedFor - state.now <= AGENT_FREEZE_WINDOW_MINUTES;
-  const previousStillPractical = previous
-    && previous.plannedStart <= partyPlanningMinute(state, party) + 15;
-  if (insideFreezeWindow && previousStillPractical) return previous;
-  if (previousStillPractical && best.planScore - previous.planScore < AGENT_STABILITY_THRESHOLD) return previous;
-  return best;
-}
 
-function publishCandidatePlan(state, party, entries, tableAvailableAt) {
-  const previousTop = party.candidateTableIds[0] || null;
-  const hadExistingPlan = Boolean(previousTop && party.candidateUpdatedAt != null);
-  const primary = choosePrimaryCandidate(state, party, entries);
-  if (!primary) {
-    clearCandidatePlan(party);
-    return { changed: Boolean(previousTop), planned: false };
-  }
 
-  const candidates = [primary, ...entries.filter((entry) => entry.table.id !== primary.table.id)]
-    .slice(0, 3)
-    .map((entry) => entry.table.id);
-  const nextTop = candidates[0];
-  const changed = previousTop !== nextTop;
-  party.candidateTableIds = candidates;
-  party.candidateUpdatedAt = state.now;
-  party.candidateFrozen = party.status === "upcoming"
-    && party.reservedFor - state.now <= AGENT_FREEZE_WINDOW_MINUTES;
-  party.candidateState = party.hostOverrideTableId ? "host_override" : "tentative";
-  party.candidateReason = primary.result.reasons.slice(0, 2).join("; ");
 
-  if (party.status === "waiting") {
-    if (party.autoAssignAt == null || changed) {
-      party.autoAssignAt = hadExistingPlan && !changed ? state.now : state.now + AGENT_FREEZE_WINDOW_MINUTES;
-    }
-  } else {
-    party.autoAssignAt = null;
-  }
 
-  tableAvailableAt.set(primary.table.id, primary.plannedStart + EXPECTED_DWELL_MINUTES + TABLE_RESET_MINUTES);
-  if (changed) logActivity(state, "set_candidates", `${party.name} → ${candidates.join(" · ")}`, "agent");
-  return { changed, planned: true };
-}
-
-function commitLocalCandidateDeadlines(state) {
-  let committedCount = 0;
-  const due = getWaitingParties(state)
-    .filter((party) => !party.committedTableId && party.autoAssignAt != null && party.autoAssignAt <= state.now)
-    .sort((left, right) => {
-      if (left.source !== right.source) return left.source === "reservation" ? -1 : 1;
-      return left.autoAssignAt - right.autoAssignAt || priorityValue(state, right) - priorityValue(state, left);
-    });
-
-  for (const party of due) {
-    const tableId = party.candidateTableIds.find((candidateId) => (
-      checkAssignmentLegality(state, party.id, candidateId, { forCandidate: true, source: "agent" }).legal
-    ));
-    if (!tableId) {
-      party.autoAssignAt = null;
-      continue;
-    }
-    const result = assignTable(state, party.id, tableId, { source: "agent", skipPlan: true });
-    if (result.ok) committedCount += 1;
-  }
-  return committedCount;
-}
-
-function refreshCandidates(state, allowAutoCommit = true) {
-  const tableAvailableAt = new Map(state.tables.map((table) => [table.id, projectedFreeMinute(table, state.now)]));
-  const planningParties = state.parties.filter((party) => isInsidePlanningHorizon(state, party)).sort((a, b) => planningOrder(state, a, b));
-  let changedCount = 0;
-  let plannedCount = 0;
-
-  for (const party of state.parties) {
-    if (["upcoming", "waiting"].includes(party.status) && !isInsidePlanningHorizon(state, party) && !party.committedTableId) {
-      clearCandidatePlan(party);
-    }
-  }
-
-  for (const party of planningParties) {
-    const published = publishCandidatePlan(state, party, scheduledCandidateScores(state, party, tableAvailableAt), tableAvailableAt);
-    changedCount += Number(published.changed);
-    plannedCount += Number(published.planned);
-  }
-
-  const committedCount = allowAutoCommit ? commitLocalCandidateDeadlines(state) : 0;
-  if (committedCount) {
-    const refreshed = refreshCandidates(state, false);
-    changedCount += refreshed.changedCount;
-    plannedCount = refreshed.plannedCount;
-  }
-  return { changedCount, plannedCount, committedCount };
-}
-
-function updatePlanNarrative(state) {
-  const waiting = getWaitingParties(state).filter((party) => !party.committedTableId);
-  const next = waiting
-    .filter((party) => party.candidateTableIds.length)
-    .sort((a, b) => (a.autoAssignAt ?? Infinity) - (b.autoAssignAt ?? Infinity))[0];
-
-  if (next) {
-    state.plan = `${next.name}: ${next.candidateTableIds.join(" · ")}. Auto-assign in ${Math.max(0, next.autoAssignAt - state.now)} restaurant min unless the host overrides.`;
-  } else if (waiting.length) {
-    state.plan = `${waiting.length} ${waiting.length === 1 ? "party is" : "parties are"} waiting; no legal table is ready yet.`;
-  } else {
-    state.plan = "The floor is balanced. Watching arrivals, expected finishes, and host locks.";
-  }
-}
-
-export function runAgentCycle(state, options = {}) {
-  if (!state.agentEnabled) return state;
-  const reason = options.reason || "scheduled heartbeat";
-  state.agentReview.status = "reviewing";
-  state.agentReview.reason = reason;
-  state.agentReview.requestedAt = state.now;
-  const result = refreshCandidates(state, options.allowAutoCommit ?? true);
-  state.agentReview.status = result.changedCount || result.committedCount ? "planned" : "observing";
-  state.agentReview.lastReviewAt = state.now;
-  state.agentReview.nextReviewAt = state.now + AGENT_HEARTBEAT_MINUTES;
-  state.agentReview.requestedAt = null;
-  state.agentReview.plannedPartyCount = result.plannedCount;
-  state.agentReview.changedPartyCount = result.changedCount;
-  updatePlanNarrative(state);
-  if (options.log !== false) {
-    logActivity(
-      state,
-      "review_floor",
-      `${reason} · ${result.plannedCount} planned${result.changedCount ? ` · ${result.changedCount} changed` : " · stable"}`,
-      "agent"
-    );
-  }
-  return state;
-}
-
-function requestAgentReview(state, reason, options = {}) {
-  if (state.agentEnabled) return runAgentCycle(state, { reason, allowAutoCommit: options.allowAutoCommit ?? true });
+function requestAgentReview(state, reason) {
   if (state.controllerMode === "external") {
     state.agentReview.status = "review_due";
     state.agentReview.reason = reason;
@@ -555,27 +378,38 @@ function requestAgentReview(state, reason, options = {}) {
   return state;
 }
 
-function commitExternalCandidateDeadlines(state) {
-  if (state.controllerMode !== "external" || state.agentConnection?.mode !== "autonomous") return;
+function isHostPlan(party) {
+  return Boolean(party.hostOverrideTableId && party.candidateTableIds[0] === party.hostOverrideTableId);
+}
+
+function agentMayAutoCommit(state) {
+  return state.controllerMode === "external" && state.agentConnection?.mode === "autonomous";
+}
+
+// A tentative plan executes at arrival when it is the host's own override or when an
+// autonomous agent published it. Advisory agents only propose.
+function scheduleArrivalCommit(state, party) {
+  if (!party.candidateTableIds.length) return;
+  if (isHostPlan(party) || agentMayAutoCommit(state)) party.autoAssignAt = state.now;
+}
+
+function commitCandidateDeadlines(state) {
   const due = getWaitingParties(state)
     .filter((party) => party.autoAssignAt != null && party.autoAssignAt <= state.now && party.candidateTableIds.length)
+    .filter((party) => isHostPlan(party) || agentMayAutoCommit(state))
     .sort((left, right) => {
       if (left.source !== right.source) return left.source === "reservation" ? -1 : 1;
       return left.autoAssignAt - right.autoAssignAt;
     });
   for (const party of due) {
-    assignTable(state, party.id, party.candidateTableIds[0], { source: "agent", skipPlan: true });
+    assignTable(state, party.id, party.candidateTableIds[0], { source: isHostPlan(party) ? "host" : "agent", skipPlan: true });
   }
 }
 
 function assignmentOriginFor(state, source, preservedOrigin = null) {
   if (preservedOrigin) return clone(preservedOrigin);
-  if (source === "host") return { kind: "host", label: "Host override" };
-  if (source === "agent" && state.controllerMode === "external") {
-    return { kind: "external", label: state.agentConnection?.name || "External AI" };
-  }
-  if (source === "agent") return { kind: "local", label: "Basic algo" };
-  return { kind: "system", label: "Service clock" };
+  if (source === "host") return { kind: "host", label: "Host" };
+  return { kind: "external", label: state.agentConnection?.name || "Agent" };
 }
 
 function assignmentReasonFor(scored, origin, suppliedReason = null) {
@@ -681,7 +515,7 @@ export function assignTable(state, partyId, tableId, options = {}) {
     logActivity(state, "assign_table", `${table.id} held next for ${party.name} · ${assignmentOrigin.label} · ${assignmentReason}`, source);
   }
 
-  if (!options.skipPlan) requestAgentReview(state, source === "host" ? "host assignment override" : "assignment committed", { allowAutoCommit: false });
+  if (!options.skipPlan) requestAgentReview(state, source === "host" ? "host assignment override" : "assignment committed");
   return success(state, { partyId, tableId, seated: party.status === "seated", held: party.status === "waiting" });
 }
 
@@ -707,7 +541,7 @@ export function moveParty(state, partyId, tableId, options = {}) {
   party.committedTableId = null;
   seatPartyAtTable(state, party, destination, options.source || "host", options);
   logActivity(state, "move_party", `${party.name}: ${currentTable?.id || "waitlist"} → ${destination.id}`, options.source || "host");
-  requestAgentReview(state, "party moved", { allowAutoCommit: false });
+  requestAgentReview(state, "party moved");
   return success(state, { partyId, from: currentTable?.id || null, to: tableId });
 }
 
@@ -733,7 +567,7 @@ export function unassignParty(state, partyId, options = {}) {
   clearCandidatePlan(party);
   party.hostOverrideTableId = null;
   logActivity(state, "unassign", `${party.name} returned to the queue`, options.source || "agent");
-  requestAgentReview(state, "party returned to queue", { allowAutoCommit: false });
+  requestAgentReview(state, "party returned to queue");
   return success(state, { partyId });
 }
 
@@ -789,7 +623,7 @@ export function setHostCandidateOverride(state, partyId, tableId) {
   const result = setCandidates(state, partyId, candidates, null, { source: "host" });
   if (!result.ok) return result;
   logActivity(state, "override_candidate", `${party.name} → ${tableId} · host`, "host");
-  requestAgentReview(state, "host changed a tentative table", { allowAutoCommit: false });
+  requestAgentReview(state, "host changed a tentative table");
   return success(state, { partyId, tableId, candidateState: party.candidateState });
 }
 
@@ -800,7 +634,7 @@ export function lockTable(state, tableId, reason = "Host hold", options = {}) {
   table.lockedBy = options.source || "host";
   table.lockReason = reason;
   logActivity(state, "lock_table", `${table.id} · ${reason}`, options.source || "host");
-  requestAgentReview(state, "table lock changed", { allowAutoCommit: false });
+  requestAgentReview(state, "table lock changed");
   return success(state, { tableId, locked: true });
 }
 
@@ -813,7 +647,7 @@ export function unlockTable(state, tableId, options = {}) {
   table.lockedBy = null;
   table.lockReason = null;
   logActivity(state, "unlock_table", table.id, source);
-  requestAgentReview(state, "table lock changed", { allowAutoCommit: false });
+  requestAgentReview(state, "table lock changed");
   return success(state, { tableId, locked: false });
 }
 
@@ -845,7 +679,7 @@ export function holdTable(state, tableId, partyId, until, options = {}) {
     return failure(state, "TABLE_COMMITTED", `${table.id} already has a next party.`);
   }
   logActivity(state, "hold_table", `${table.id} → ${party.name} until ${minutesToTime(until)}`, source);
-  requestAgentReview(state, "table hold changed", { allowAutoCommit: false });
+  requestAgentReview(state, "table hold changed");
   return success(state, { tableId, partyId, until: Math.round(until) });
 }
 
@@ -857,7 +691,7 @@ export function releaseHold(state, tableId, options = {}) {
   table.holdUntil = null;
   table.nextPartyId = null;
   logActivity(state, "release_hold", table.id, options.source || "agent");
-  requestAgentReview(state, "table hold released", { allowAutoCommit: false });
+  requestAgentReview(state, "table hold released");
   return success(state, { tableId });
 }
 
@@ -898,7 +732,7 @@ export function markTable(state, tableId, status, options = {}) {
     return failure(state, "PARTY_REQUIRED", "A party must be assigned before marking a table seated.");
   }
   logActivity(state, "mark_table", `${table.id} → ${table.status}`, options.source || "agent");
-  requestAgentReview(state, "table readiness changed", { allowAutoCommit: false });
+  requestAgentReview(state, "table readiness changed");
   return success(state, { tableId, status: table.status });
 }
 
@@ -910,9 +744,7 @@ export function markParty(state, partyId, status, options = {}) {
     if (party.status !== "upcoming") return failure(state, "INVALID_PARTY_TRANSITION", `${party.name} cannot arrive from ${party.status}.`);
     party.status = "waiting";
     if (party.source === "walk_in") party.arrivedAt ??= state.now;
-    if (state.controllerMode === "external" && party.candidateTableIds.length && state.agentConnection?.mode === "autonomous") {
-      party.autoAssignAt = state.now;
-    }
+    scheduleArrivalCommit(state, party);
   } else {
     if (status === "no_show" && !["upcoming", "waiting"].includes(party.status)) {
       return failure(state, "INVALID_PARTY_TRANSITION", `${party.name} cannot be marked no-show from ${party.status}.`);
@@ -949,7 +781,7 @@ export function setWeights(state, sat, turn = 1 - sat, options = {}) {
   }
   state.weights = { sat: satNumber, turn: turnNumber };
   logActivity(state, "set_weights", `Sat ${Math.round(satNumber * 100)} · Turn ${Math.round(turnNumber * 100)}`, options.source || "host");
-  requestAgentReview(state, "service objective changed", { allowAutoCommit: false });
+  requestAgentReview(state, "service objective changed");
   return success(state, { weights: clone(state.weights) });
 }
 
@@ -1045,9 +877,7 @@ function processEvent(state, event) {
         party.size += party.checkInSizeDelta;
         party.checkInSizeDelta = 0;
       }
-      if (state.controllerMode === "external" && party.candidateTableIds.length && state.agentConnection?.mode === "autonomous") {
-        party.autoAssignAt = state.now;
-      }
+      scheduleArrivalCommit(state, party);
       const arrivalDetail = party.size > previousSize
         ? `${party.name} arrived · party grew ${previousSize} → ${party.size}`
         : `${party.name} arrived · party of ${party.size}`;
@@ -1088,25 +918,13 @@ function processMinute(state) {
   }
   if (processTableTransitions(state)) reviewReasons.push("table transition");
 
-  if (state.agentEnabled) {
-    if (reviewReasons.length) {
-      runAgentCycle(state, { reason: [...new Set(reviewReasons)].join(" + ") });
-    } else {
-      const committedCount = commitLocalCandidateDeadlines(state);
-      if (committedCount) runAgentCycle(state, { reason: "assignment committed", allowAutoCommit: false });
-      else if (state.agentReview.nextReviewAt != null && state.now >= state.agentReview.nextReviewAt) {
-        runAgentCycle(state, { reason: "10-minute heartbeat" });
-      }
-    }
-  } else {
-    commitExternalCandidateDeadlines(state);
-    if (reviewReasons.length) requestAgentReview(state, [...new Set(reviewReasons)].join(" + "));
-    if (state.controllerMode === "external"
-      && state.agentReview.status !== "review_due"
-      && state.agentReview.nextReviewAt != null
-      && state.now >= state.agentReview.nextReviewAt) {
-      requestAgentReview(state, "10-minute heartbeat");
-    }
+  commitCandidateDeadlines(state);
+  if (reviewReasons.length) requestAgentReview(state, [...new Set(reviewReasons)].join(" + "));
+  if (state.controllerMode === "external"
+    && state.agentReview.status !== "review_due"
+    && state.agentReview.nextReviewAt != null
+    && state.now >= state.agentReview.nextReviewAt) {
+    requestAgentReview(state, "10-minute heartbeat");
   }
   bump(state);
 }
@@ -1139,40 +957,11 @@ export function getNextEventMinute(state) {
   return Math.min(...candidates);
 }
 
-export function setAgentEnabled(state, enabled) {
-  state.agentEnabled = Boolean(enabled);
-  state.controllerMode = state.agentEnabled ? "local" : "manual";
-  state.agentConnection = null;
-  logActivity(state, "agent_mode", state.agentEnabled ? "Basic algo enabled" : "Manual floor · drag or tap to assign", "host");
-  if (state.agentEnabled) {
-    state.agentReview.status = "reviewing";
-    state.agentReview.reason = "Basic algo enabled";
-    state.agentReview.nextReviewAt = state.now + AGENT_HEARTBEAT_MINUTES;
-    runAgentCycle(state, { reason: "Basic algo enabled", allowAutoCommit: false });
-  } else {
-    for (const party of state.parties) {
-      clearCandidatePlan(party);
-      party.hostOverrideTableId = null;
-    }
-    state.agentReview = {
-      status: "manual",
-      reason: "manual control",
-      lastReviewAt: null,
-      nextReviewAt: null,
-      requestedAt: null,
-      plannedPartyCount: 0,
-      changedPartyCount: 0
-    };
-    state.plan = "Allocation automation is off. The host owns every table assignment.";
-  }
-  return success(state, { agentEnabled: state.agentEnabled });
-}
 
 export function attachExternalAgent(state, name, mode = "autonomous") {
   const cleanName = String(name || "").trim().slice(0, 64);
   if (!cleanName) return failure(state, "INVALID_AGENT", "Provide a short agent name.");
   if (!["advisory", "autonomous"].includes(mode)) return failure(state, "INVALID_AGENT_MODE", "Agent mode must be advisory or autonomous.");
-  state.agentEnabled = false;
   state.controllerMode = "external";
   state.agentConnection = { name: cleanName, mode, attachedAt: state.now, lastSeenAt: state.now };
   for (const party of state.parties) {
@@ -1201,22 +990,13 @@ export function attachExternalAgent(state, name, mode = "autonomous") {
 
 export function detachExternalAgent(state, options = {}) {
   const previous = state.agentConnection?.name || "External agent";
-  state.agentEnabled = false;
   state.controllerMode = "manual";
   state.agentConnection = null;
   for (const party of state.parties) {
     clearCandidatePlan(party);
     party.hostOverrideTableId = null;
   }
-  state.agentReview = {
-    status: "manual",
-    reason: "manual control",
-    lastReviewAt: null,
-    nextReviewAt: null,
-    requestedAt: null,
-    plannedPartyCount: 0,
-    changedPartyCount: 0
-  };
+  state.agentReview = manualReview();
   state.plan = "External agent disconnected. The floor is in manual mode.";
   logActivity(state, "detach_agent", `${previous} disconnected`, options.source || "agent");
   return success(state, { controllerMode: state.controllerMode });
@@ -1335,7 +1115,7 @@ export function getServiceRecap(state) {
   const grade = score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";
   const provenance = new Map();
   for (const record of records) {
-    const origin = record.assignmentOrigin || { kind: record.source === "host" ? "host" : "local", label: record.source === "host" ? "Host override" : "Basic algo" };
+    const origin = record.assignmentOrigin;
     const current = provenance.get(origin.kind) || { kind: origin.kind, label: origin.label, assignments: 0, covers: 0 };
     current.assignments += 1;
     current.covers += record.size;
@@ -1375,7 +1155,7 @@ function nextRecommendedActions(state) {
   if (state.controllerMode === "external" && state.agentReview.status === "review_due") {
     return ["Read get_floor and get_queue", "Publish up to three candidates with a concise reason", "Explain the current whole-floor plan"];
   }
-  return ["Monitor tentative tables", "Override any plan by dragging a party to another legal table"];
+  return ["Keep tentative tables current for parties inside the 45-minute horizon", "Re-read get_floor after every write"];
 }
 
 export function getFloorSnapshot(state) {

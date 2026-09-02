@@ -19,8 +19,6 @@ import {
   lockTable,
   markParty,
   markTable,
-  runAgentCycle,
-  setAgentEnabled,
   setHostCandidateOverride,
   setWeights,
   unlockTable
@@ -46,7 +44,6 @@ let lastRealTick = performance.now();
 let lastAnimatedActivity = null;
 let resetQueueViewport = false;
 let recapClosedForRun = null;
-const localBaselineCache = new Map();
 
 const icons = {
   pause: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
@@ -96,37 +93,17 @@ function renderServiceBrief() {
   `;
 }
 
-function getLocalBaselineRecap() {
-  const cacheKey = `${state.scenarioSeed}:${state.weights.sat}:${state.weights.turn}`;
-  if (localBaselineCache.has(cacheKey)) return localBaselineCache.get(cacheKey);
-  const baseline = createInitialState({
-    scenarioSeed: state.scenarioSeed,
-    randomizeScenario: true,
-    agentEnabled: true
-  });
-  baseline.weights = { ...state.weights };
-  runAgentCycle(baseline, { reason: "baseline objective", log: false, allowAutoCommit: false });
-  advanceTo(baseline, SERVICE_END);
-  const recap = getServiceRecap(baseline);
-  localBaselineCache.set(cacheKey, recap);
-  return recap;
-}
 
 function renderServiceRecap() {
   if (state.now < SERVICE_END) return "";
   const recap = getServiceRecap(state);
-  const baseline = getLocalBaselineRecap();
-  const delta = recap.score - baseline.score;
-  const comparison = delta === 0
-    ? "Matches the same-night Basic algo baseline"
-    : `${Math.abs(delta)} point${Math.abs(delta) === 1 ? "" : "s"} ${delta > 0 ? "above" : "below"} the same-night Basic algo baseline`;
   return `
     <dialog class="recap-dialog" id="service-recap" aria-labelledby="recap-title">
       <div class="recap-dialog__head">
         <div>
           <span class="command-kicker">SERVICE COMPLETE · ${escapeHtml(state.runCode)}</span>
           <h2 id="recap-title">How the floor performed</h2>
-          <p>${escapeHtml(comparison)} · baseline ${baseline.score}/100</p>
+          <p>Host and agent decisions, graded on the same floor.</p>
         </div>
         <div class="recap-grade" aria-label="Grade ${recap.grade}, ${recap.score} out of 100"><strong>${recap.grade}</strong><span>${recap.score}/100</span></div>
       </div>
@@ -169,24 +146,14 @@ function agentReviewPresentation() {
       meta: "The host assigns every arriving party"
     };
   }
-  if (state.controllerMode === "external") {
-    const due = state.agentReview.status === "review_due";
-    return {
-      label: due ? "Review requested" : "Plan received",
-      detail: due ? state.agentReview.reason : `Last review ${minutesToTime(state.agentReview.lastReviewAt ?? state.now)}`,
-      tone: due ? "due" : "planned",
-      meta: due ? "Waiting for the attached agent to re-read the floor" : "Event-driven through WebMCP"
-    };
-  }
-  const justReviewed = state.agentReview.lastReviewAt === state.now;
-  const label = state.agentReview.status === "planned" && justReviewed
-    ? "Plan updated"
-    : state.agentReview.status === "observing" ? "Algorithm observing" : "Algorithm ready";
+  const due = state.agentReview.status === "review_due";
   return {
-    label,
-    detail: state.agentReview.nextReviewAt == null ? "Event-driven" : `Next review ${minutesToTime(state.agentReview.nextReviewAt)}`,
-    tone: state.agentReview.status,
-    meta: `${state.agentReview.plannedPartyCount} tentative · ${AGENT_PLANNING_HORIZON_MINUTES}m horizon · T−${AGENT_FREEZE_WINDOW_MINUTES} lock`
+    label: due ? "Review requested" : "Plan received",
+    detail: due ? state.agentReview.reason : `Last review ${minutesToTime(state.agentReview.lastReviewAt ?? state.now)}`,
+    tone: due ? "due" : "planned",
+    meta: due
+      ? "Waiting for the attached agent to re-read the floor"
+      : `${state.agentReview.plannedPartyCount} tentative · ${AGENT_PLANNING_HORIZON_MINUTES}m horizon · T−${AGENT_FREEZE_WINDOW_MINUTES} lock`
   };
 }
 
@@ -226,7 +193,7 @@ function animateAgentAssignment(transition) {
   const marker = document.createElement("div");
   marker.className = "assignment-flight";
   marker.setAttribute("aria-hidden", "true");
-  marker.innerHTML = `<span>${transition.origin?.kind === "local" ? "ALG" : "AI"}</span><strong>${escapeHtml(transition.party.name)}</strong><small>→ ${escapeHtml(transition.tableId)}</small>`;
+  marker.innerHTML = `<span>AI</span><strong>${escapeHtml(transition.party.name)}</strong><small>→ ${escapeHtml(transition.tableId)}</small>`;
   marker.style.left = `${transition.from.left}px`;
   marker.style.top = `${transition.from.top}px`;
   marker.style.width = `${Math.min(transition.from.width, 220)}px`;
@@ -265,12 +232,10 @@ function resetNight() {
   const previousConnection = state.agentConnection ? { ...state.agentConnection } : null;
   const fresh = createInitialState({
     scenarioSeed: createScenarioSeed(),
-    randomizeScenario: true,
-    agentEnabled: previousController === "local"
+    randomizeScenario: true
   });
   if (previousController === "external" && previousConnection) {
     fresh.controllerMode = "external";
-    fresh.agentEnabled = false;
     fresh.agentConnection = { ...previousConnection, attachedAt: fresh.now, lastSeenAt: fresh.now };
     fresh.agentReview = {
       status: "review_due",
@@ -404,7 +369,7 @@ function renderTable(table, activeParty) {
     ? `<span class="table-status table-status--due" title="Expected finish ${escapeHtml(expectedFinish)}">${icon("clock")}<time>${escapeHtml(expectedFinish.replace(" PM", ""))}</time></span>`
     : `<span class="table-status ${dirtyMinutes != null ? "table-status--dirty" : ""}">${escapeHtml(dirtyMinutes != null ? `Dirty ${dirtyMinutes}m` : statusLabel(table))}</span>`;
   const originBadge = table.status === "seated" && table.assignmentOrigin
-    ? `<span class="table-provenance is-${escapeHtml(table.assignmentOrigin.kind)}" title="${escapeHtml(`${table.assignmentOrigin.label}: ${table.assignmentReason || "Assignment recorded"}`)}">${table.assignmentOrigin.kind === "host" ? "HOST" : table.assignmentOrigin.kind === "local" ? "ALG" : "AI"}</span>`
+    ? `<span class="table-provenance is-${escapeHtml(table.assignmentOrigin.kind)}" title="${escapeHtml(`${table.assignmentOrigin.label}: ${table.assignmentReason || "Assignment recorded"}`)}">${table.assignmentOrigin.kind === "host" ? "HOST" : "AI"}</span>`
     : "";
   const classes = [
     "table-node",
@@ -463,7 +428,7 @@ function candidateButtons(party) {
     if (state.controllerMode === "manual") return '<span class="candidate-empty">Manual · assign at arrival</span>';
     const insideHorizon = party.reservedFor <= state.now + AGENT_PLANNING_HORIZON_MINUTES;
     if (!insideHorizon) return `<span class="candidate-empty">Agent watches at T−${AGENT_PLANNING_HORIZON_MINUTES}</span>`;
-    if (!party.candidateTableIds.length) return `<span class="candidate-empty">${state.controllerMode === "external" ? "Waiting for agent…" : "Reviewing floor…"}</span>`;
+    if (!party.candidateTableIds.length) return '<span class="candidate-empty">Waiting for agent…</span>';
     return party.candidateTableIds.map((tableId, index) => `
       <button
         type="button"
@@ -479,7 +444,7 @@ function candidateButtons(party) {
   if (party.status !== "waiting") return "";
   if (!party.candidateTableIds.length) {
     if (state.controllerMode === "external") return '<span class="candidate-empty">Waiting for agent…</span>';
-    return state.agentEnabled ? '<span class="candidate-empty">Re-solving floor…</span>' : '<span class="candidate-empty">Drag to any legal table</span>';
+    return '<span class="candidate-empty">Drag to any legal table</span>';
   }
   return party.candidateTableIds.map((tableId, index) => `
     <button
@@ -498,10 +463,7 @@ function candidateStateLabel(party) {
   if (party.committedTableId) return "Committed";
   if (party.hostOverrideTableId) return "Host override";
   if (getReservationPriorityBlocker(state, party)) return "After reservation";
-  if (party.candidateState === "tentative") {
-    const owner = state.controllerMode === "external" ? "AI plan" : "Algorithm plan";
-    return party.candidateFrozen ? `${owner} · locked` : owner;
-  }
+  if (party.candidateState === "tentative") return party.candidateFrozen ? "AI plan · locked" : "AI plan";
   return party.status === "waiting" ? "Seat now" : "Potential";
 }
 
@@ -517,7 +479,7 @@ function partyTiming(party) {
   if (state.controllerMode === "manual") return `${waited}m wait · manual`;
   if (getReservationPriorityBlocker(state, party)) return `${waited}m wait · res first`;
   if (party.autoAssignAt == null) return `${waited}m wait`;
-  return `${waited}m wait · ${state.controllerMode === "external" ? "agent" : "auto"} ${Math.max(0, party.autoAssignAt - state.now)}m`;
+  return `${waited}m wait · agent ${Math.max(0, party.autoAssignAt - state.now)}m`;
 }
 
 function partyQueueMinute(party) {
@@ -730,10 +692,9 @@ function renderAgentConnector() {
         <span class="command-kicker">EXTERNAL AGENT</span>
         <strong>${connection ? `${escapeHtml(connection.name)} is attached` : "Attach through WebMCP"}</strong>
         <p>${connection ? `${escapeHtml(connection.mode)} mode · connection stays attached across new random runs.` : `${capability} No API key is needed: the WebMCP-capable browser agent supplies the model. Open this deployed page there, paste the prompt, and watch its named decisions appear on the floor.`}</p>
-        <div class="controller-mode-guide" aria-label="Available controller modes">
-          <span class="${state.controllerMode === "manual" ? "is-current" : ""}"><b>Manual host</b><small>Drag on arrival</small></span>
-          <span class="${state.controllerMode === "local" ? "is-current" : ""}"><b>Basic algo</b><small>Deterministic baseline</small></span>
-          <span class="${state.controllerMode === "external" ? "is-current" : ""}"><b>External AI</b><small>WebMCP decisions</small></span>
+        <div class="controller-mode-guide" aria-label="Available operating modes">
+          <span class="${state.controllerMode === "manual" ? "is-current" : ""}"><b>Manual host</b><small>The human seats every arrival</small></span>
+          <span class="${state.controllerMode === "external" ? "is-current" : ""}"><b>Agent</b><small>A WebMCP browser agent plans and explains</small></span>
         </div>
       </div>
       ${connection ? `
@@ -790,18 +751,15 @@ function render() {
   const clockProgress = ((state.now - SERVICE_START) / (SERVICE_END - SERVICE_START)) * 100;
   const activityChips = state.activity.slice(0, 3).map((entry) => `<span><code>${escapeHtml(entry.tool)}</code> ${escapeHtml(entry.detail)}</span>`).join("");
   const clockAction = state.running ? "Pause" : state.now === SERVICE_START ? "Start" : "Resume";
-  const controllerLabel = "Basic algo";
-  const planLabel = state.controllerMode === "external"
-    ? state.agentConnection?.name || "External AI"
-    : state.agentEnabled ? "Basic algo" : "Manual host";
+  const agentAttached = state.controllerMode === "external" && state.agentConnection;
+  const planLabel = agentAttached ? state.agentConnection.name : "Manual host";
+  const modeLabel = agentAttached ? `Agent: ${state.agentConnection.name}` : "Manual host";
   const planText = state.controllerMode === "manual"
-    ? "Allocation automation is off. Assign arrived parties by drag or select-then-table; all hard constraints still apply."
+    ? "No agent is attached. Seat arrived parties by drag or select-then-table; the engine still enforces every hard rule."
     : state.plan;
   const hostGuidance = state.controllerMode === "manual"
     ? "Manual · arrived parties only."
-    : state.controllerMode === "external"
-      ? "AI plans · drag to override."
-      : "Algorithm plans · drag to override.";
+    : "AI plans · accept, reject, or drag to override.";
   const reviewPresentation = agentReviewPresentation();
   const queueCount = queueParties.length;
 
@@ -836,9 +794,9 @@ function render() {
           </div>
 
           <div class="topbar-actions">
-            <button class="agent-toggle ${state.agentEnabled ? "is-on" : ""} ${state.controllerMode === "external" ? "has-external" : ""}" type="button" role="switch" aria-checked="${state.agentEnabled}" aria-label="Basic algo" data-action="toggle-agent" data-focus-key="agent-toggle" title="Turn the built-in Basic algo on or off">
-              <span class="agent-toggle__track"><span></span></span>
-              <span>${escapeHtml(controllerLabel)}</span>
+            <button class="mode-indicator ${agentAttached ? "is-agent" : ""}" type="button" data-action="open-agent-panel" data-focus-key="mode-indicator" aria-label="Operating mode: ${escapeHtml(modeLabel)}. Open the agent connection panel." title="${escapeHtml(modeLabel)}">
+              <i aria-hidden="true"></i>
+              <span>${escapeHtml(modeLabel)}</span>
             </button>
             <button class="control agent-connect-control" type="button" data-action="open-agent-panel" data-focus-key="agent-connect">${state.agentConnection ? "Agent" : "Connect AI"}</button>
             <button class="control reset-control" type="button" data-action="reset-night" data-focus-key="reset-night" title="Clear the floor and generate a different service scenario">New run</button>
@@ -896,7 +854,6 @@ function render() {
             <div class="agent-review-meta" role="status" aria-live="polite">
               <strong>${escapeHtml(reviewPresentation.label)}</strong>
               <span>${escapeHtml(reviewPresentation.meta)}</span>
-              ${state.controllerMode === "local" ? `<span>Full review every ${AGENT_HEARTBEAT_MINUTES}m + floor events</span>` : ""}
             </div>
             ${renderServiceBrief()}
           </div>
@@ -1033,10 +990,6 @@ root.addEventListener("click", (event) => {
     advanceTo(state, getNextEventMinute(state));
     renderAgentChange();
     return;
-  }
-  if (action === "toggle-agent") {
-    setAgentEnabled(state, !state.agentEnabled);
-    if (!hostActionForParty(getParty(state, selectedPartyId))) selectedPartyId = null;
   }
   if (action === "reset-night") resetNight();
   if (action === "open-recap") {

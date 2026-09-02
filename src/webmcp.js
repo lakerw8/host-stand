@@ -13,6 +13,7 @@ import {
   markTable,
   moveParty,
   quoteWait,
+  rankCandidateTables,
   releaseHold,
   scoreAssignment,
   setCandidates,
@@ -119,7 +120,7 @@ export function createToolDefinitions({ state, clock, onChange }) {
   const definitions = [
     {
       name: "attach_agent",
-      description: "Attach this browser agent to the Host Stand floor and take planning ownership from the built-in deterministic optimizer. Call this before publishing candidates or assignments.",
+      description: "Attach this browser agent to the Host Stand floor and take planning ownership from the human host. The engine keeps enforcing legality, capacity, accessibility, locks, and reservation priority; you interpret special requests and explain plans. Call this before publishing candidates or assignments.",
       inputSchema: objectSchema(
         {
           agent_name: { type: "string", minLength: 1, maxLength: 64, description: "Visible name for the connected AI agent." },
@@ -153,16 +154,20 @@ export function createToolDefinitions({ state, clock, onChange }) {
     },
     {
       name: "score_assignment",
-      description: "Score one party-table pairing without changing the floor. Returns legality, satisfaction, turn efficiency, availability delay, reservation-priority status, and plain-language reasons. A walk-in plan may score as legal while its commitment remains blocked until available reservations are seated.",
+      description: "Scoring service, not a planner. With table_id, scores one party-table pairing without changing the floor: legality, satisfaction, turn efficiency, availability delay, reservation-priority status, and plain-language reasons. Without table_id, returns every legal table for the party ranked by the engine's baseline score. The baseline knows nothing about free-text special requests; you must weigh those yourself. A walk-in plan may score as legal while its commitment remains blocked until available reservations are seated.",
       inputSchema: objectSchema(
         {
           party_id: stringId("Party id from get_queue."),
-          table_id: stringId("Table id from get_floor.")
+          table_id: stringId("Optional table id from get_floor. Omit to rank every legal table.")
         },
-        ["party_id", "table_id"]
+        ["party_id"]
       ),
       annotations: { readOnlyHint: true, untrustedContentHint: false },
-      execute: ({ party_id, table_id }) => scoreAssignment(state, party_id, table_id, { forCandidate: true, allowUpcoming: true })
+      execute: ({ party_id, table_id }) => (
+        table_id == null
+          ? { partyId: party_id, ranked: rankCandidateTables(state, party_id).slice(0, 8) }
+          : scoreAssignment(state, party_id, table_id, { forCandidate: true, allowUpcoming: true })
+      )
     },
     {
       name: "set_candidates",

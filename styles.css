@@ -185,7 +185,7 @@ svg {
 
 .icon-control,
 .command-trigger,
-.agent-toggle,
+.mode-indicator,
 .control,
 .candidate-button,
 .party-select,
@@ -209,7 +209,6 @@ svg {
 
 .icon-control:active,
 .command-trigger:active,
-.agent-toggle:active,
 .control:active,
 .candidate-button:active,
 .party-select:active,
@@ -354,7 +353,6 @@ svg {
   gap: var(--space-xs);
 }
 
-.agent-toggle,
 .command-trigger {
   align-items: center;
   background: var(--color-paper);
@@ -384,36 +382,39 @@ svg {
   padding-inline: var(--space-sm);
 }
 
-.agent-toggle.has-external {
+.mode-indicator {
+  align-items: center;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  gap: var(--space-xs);
+  padding-inline: var(--space-sm);
+}
+
+.mode-indicator > i {
+  aspect-ratio: 1;
+  background: var(--color-rule-2);
+  border-radius: var(--radius-round);
+  display: block;
+  height: 0.5rem;
+}
+
+.mode-indicator.is-agent {
   border-color: var(--color-success);
 }
 
-.agent-toggle__track {
-  align-items: center;
-  background: var(--color-rule-2);
-  border-radius: var(--radius-round);
-  display: flex;
-  height: 1rem;
-  padding: var(--space-3xs);
-  width: 1.8rem;
+.mode-indicator.is-agent > i {
+  background: var(--color-success);
 }
 
-.agent-toggle__track > span {
-  aspect-ratio: 1;
-  background: var(--color-paper-raised);
-  border-radius: var(--radius-round);
-  display: block;
-  height: 0.75rem;
-  transform: translateX(0);
-  transition: transform var(--dur-short) var(--ease-in-out);
-}
-
-.agent-toggle.is-on .agent-toggle__track {
-  background: var(--color-accent);
-}
-
-.agent-toggle.is-on .agent-toggle__track > span {
-  transform: translateX(0.75rem);
+.mode-indicator > span {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .command-trigger kbd,
@@ -1643,7 +1644,7 @@ svg {
 @media (hover: hover) and (pointer: fine) {
   .icon-control:hover,
   .command-trigger:hover,
-  .agent-toggle:hover,
+  .mode-indicator:hover,
   .control:hover,
   .candidate-button:hover,
   .foot-line button:hover {
@@ -2006,7 +2007,7 @@ svg {
 }
 
 .simulation-console .icon-control,
-.simulation-console .agent-toggle,
+.simulation-console .mode-indicator,
 .simulation-console .command-trigger,
 .simulation-console .reset-control,
 .simulation-console .speed-switch,
@@ -2312,7 +2313,7 @@ svg {
 
 @media (hover: hover) and (pointer: fine) {
   .simulation-console .icon-control:hover,
-  .simulation-console .agent-toggle:hover,
+  .simulation-console .mode-indicator:hover,
   .simulation-console .command-trigger:hover,
   .simulation-console .reset-control:hover {
     background: var(--color-ink);
@@ -2878,7 +2879,7 @@ svg {
   }
 
   .controller-mode-guide {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .controller-mode-guide > span + span {
