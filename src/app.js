@@ -4,6 +4,7 @@ import {
   AGENT_HEARTBEAT_MINUTES,
   AGENT_PLANNING_HORIZON_MINUTES,
   HOST_NOTE_MAX_LENGTH,
+  acceptAgentPlan,
   addHostNote,
   advanceMinutes,
   advanceTo,
@@ -22,6 +23,7 @@ import {
   lockTable,
   markParty,
   markTable,
+  rejectAgentPlan,
   setHostCandidateOverride,
   setWeights,
   unlockTable
@@ -47,6 +49,7 @@ let lastRealTick = performance.now();
 let lastAnimatedActivity = null;
 let resetQueueViewport = false;
 let recapClosedForRun = null;
+let rejectingPartyId = null;
 
 const icons = {
   pause: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
@@ -460,7 +463,7 @@ function renderTable(table, activeParty) {
     ? `<span class="table-status table-status--due" title="Expected finish ${escapeHtml(expectedFinish)}">${icon("clock")}<time>${escapeHtml(expectedFinish.replace(" PM", ""))}</time></span>`
     : `<span class="table-status ${dirtyMinutes != null ? "table-status--dirty" : ""}">${escapeHtml(dirtyMinutes != null ? `Dirty ${dirtyMinutes}m` : statusLabel(table))}</span>`;
   const originBadge = table.status === "seated" && table.assignmentOrigin
-    ? `<span class="table-provenance is-${escapeHtml(table.assignmentOrigin.kind)}" title="${escapeHtml(`${table.assignmentOrigin.label}: ${table.assignmentReason || "Assignment recorded"}`)}">${table.assignmentOrigin.kind === "host" ? "HOST" : "AI"}</span>`
+    ? `<span class="table-provenance is-${escapeHtml(table.assignmentOrigin.kind)} ${table.assignmentOrigin.approved ? "is-approved" : ""}" title="${escapeHtml(`${table.assignmentOrigin.label}${table.assignmentOrigin.approved ? " (host approved)" : ""}: ${table.assignmentReason || "Assignment recorded"}`)}">${table.assignmentOrigin.kind === "host" ? "HOST" : table.assignmentOrigin.approved ? "AI ✓" : "AI"}</span>`
     : "";
   const seatedParty = table.status === "seated" && table.partyId ? getParty(state, table.partyId) : null;
   const allergyMark = seatedParty?.marks.allergy
@@ -558,6 +561,7 @@ function candidateButtons(party) {
 
 function candidateStateLabel(party) {
   if (party.committedTableId) return "Committed";
+  if (party.planApproved) return "AI ✓ accepted";
   if (party.hostOverrideTableId) return "Host override";
   if (getReservationPriorityBlocker(state, party)) return "After reservation";
   if (party.candidateState === "tentative") return party.candidateFrozen ? "AI plan · locked" : "AI plan";
@@ -655,8 +659,28 @@ function renderParty(party) {
           ${candidateButtons(party)}
         </div>
         ${renderRequestNote(party)}
+        ${renderPlanReview(party)}
       </div>
     </article>
+  `;
+}
+
+function renderPlanReview(party) {
+  if (state.controllerMode !== "external" || party.candidateState !== "tentative" || !party.candidateTableIds.length) return "";
+  if (rejectingPartyId === party.id) {
+    return `
+      <form class="plan-review plan-review--reject" data-form="reject-plan" data-party-id="${party.id}">
+        <input type="text" name="reason" maxlength="160" placeholder="Why not ${escapeHtml(party.candidateTableIds[0])}? (optional)" aria-label="Reason for rejecting ${escapeHtml(party.candidateTableIds[0])} for ${escapeHtml(party.name)}" autocomplete="off" data-focus-key="reject-${party.id}" />
+        <button class="control control--quiet" type="submit">Reject</button>
+        <button class="control control--quiet" type="button" data-action="cancel-reject">Cancel</button>
+      </form>
+    `;
+  }
+  return `
+    <div class="plan-review" aria-label="Review the agent plan for ${escapeHtml(party.name)}">
+      <button class="plan-review__accept" type="button" data-action="accept-plan" data-party-id="${party.id}" data-focus-key="accept-${party.id}" aria-label="Accept the agent plan ${escapeHtml(party.candidateTableIds[0])} for ${escapeHtml(party.name)}">${icon("check")} Accept</button>
+      <button class="plan-review__reject" type="button" data-action="reject-plan" data-party-id="${party.id}" data-focus-key="reject-${party.id}" aria-label="Reject the agent plan ${escapeHtml(party.candidateTableIds[0])} for ${escapeHtml(party.name)}">${icon("close")} Reject</button>
+    </div>
   `;
 }
 
@@ -1162,6 +1186,21 @@ root.addEventListener("click", (event) => {
   if (action === "override-candidate") {
     runHostTableAction(target.dataset.partyId, target.dataset.tableId);
   }
+  if (action === "accept-plan") {
+    const result = acceptAgentPlan(state, target.dataset.partyId, { source: "host" });
+    if (!result.ok) showFeedback(result.error.message);
+    else feedback = { message: `${getParty(state, target.dataset.partyId)?.name || "Party"} → ${result.tableId} accepted as the agent's plan with your sign-off.`, tone: "success" };
+  }
+  if (action === "reject-plan") {
+    rejectingPartyId = target.dataset.partyId;
+    render();
+    root.querySelector(`[data-focus-key="reject-${CSS.escape(target.dataset.partyId)}"]`)?.focus();
+    return;
+  }
+  if (action === "cancel-reject") {
+    rejectingPartyId = null;
+    interactionHold = false;
+  }
   if (action === "assign-candidate") runHostAssignment(target.dataset.partyId, target.dataset.tableId);
   if (action === "select-table") {
     const tableId = target.dataset.tableId;
@@ -1183,6 +1222,18 @@ root.addEventListener("click", (event) => {
 });
 
 root.addEventListener("submit", (event) => {
+  const rejectForm = event.target.closest('[data-form="reject-plan"]');
+  if (rejectForm) {
+    event.preventDefault();
+    const reason = rejectForm.querySelector("input[name=reason]").value;
+    const result = rejectAgentPlan(state, rejectForm.dataset.partyId, reason, { source: "host" });
+    rejectingPartyId = null;
+    interactionHold = false;
+    if (!result.ok) showFeedback(result.error.message);
+    else feedback = { message: `Plan for ${getParty(state, rejectForm.dataset.partyId)?.name || "the party"} rejected. The agent is asked to propose another table.`, tone: "success" };
+    render();
+    return;
+  }
   const form = event.target.closest('[data-form="add-host-note"]');
   if (!form) return;
   event.preventDefault();
@@ -1198,11 +1249,11 @@ root.addEventListener("submit", (event) => {
 });
 
 root.addEventListener("focusin", (event) => {
-  if (event.target.matches('[data-form="add-host-note"] input')) interactionHold = true;
+  if (event.target.matches('[data-form="add-host-note"] input, [data-form="reject-plan"] input')) interactionHold = true;
 });
 
 root.addEventListener("focusout", (event) => {
-  if (event.target.matches('[data-form="add-host-note"] input')) {
+  if (event.target.matches('[data-form="add-host-note"] input, [data-form="reject-plan"] input')) {
     interactionHold = false;
     if (!event.target.value) render();
   }

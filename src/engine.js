@@ -74,7 +74,9 @@ const runtimeParty = (definition) => ({
   request: definition.request ? clone(definition.request) : null,
   linkedPartyIds: definition.linkedPartyIds ? [...definition.linkedPartyIds] : [],
   marks: { rush: false, allergy: false, discreet: false },
-  requestTrace: { blockedAttempts: 0, confirmedSize: null, heldTableSeatsAtConfirm: null }
+  requestTrace: { blockedAttempts: 0, confirmedSize: null, heldTableSeatsAtConfirm: null },
+  rejectedTables: [],
+  planApproved: false
 });
 
 const manualReview = () => ({
@@ -443,6 +445,7 @@ function clearCandidatePlan(party) {
   party.candidateFrozen = false;
   party.candidateReason = null;
   party.candidateReasonSupplied = false;
+  party.planApproved = false;
 }
 
 
@@ -473,20 +476,78 @@ function agentMayAutoCommit(state) {
 // autonomous agent published it. Advisory agents only propose.
 function scheduleArrivalCommit(state, party) {
   if (!party.candidateTableIds.length) return;
-  if (isHostPlan(party) || agentMayAutoCommit(state)) party.autoAssignAt = state.now;
+  if (party.planApproved || isHostPlan(party) || agentMayAutoCommit(state)) party.autoAssignAt = state.now;
+}
+
+function approvedOrigin(state) {
+  return { kind: "external", label: state.agentConnection?.name || "Agent", approved: true };
+}
+
+function commitOptionsFor(state, party) {
+  if (party.planApproved) return { source: "agent", origin: approvedOrigin(state), skipPlan: true, reasonSupplied: party.candidateReasonSupplied };
+  if (isHostPlan(party)) return { source: "host", skipPlan: true };
+  return { source: "agent", skipPlan: true };
 }
 
 function commitCandidateDeadlines(state) {
   const due = getWaitingParties(state)
     .filter((party) => party.autoAssignAt != null && party.autoAssignAt <= state.now && party.candidateTableIds.length)
-    .filter((party) => isHostPlan(party) || agentMayAutoCommit(state))
+    .filter((party) => party.planApproved || isHostPlan(party) || agentMayAutoCommit(state))
     .sort((left, right) => {
       if (left.source !== right.source) return left.source === "reservation" ? -1 : 1;
       return left.autoAssignAt - right.autoAssignAt;
     });
   for (const party of due) {
-    assignTable(state, party.id, party.candidateTableIds[0], { source: isHostPlan(party) ? "host" : "agent", skipPlan: true });
+    assignTable(state, party.id, party.candidateTableIds[0], commitOptionsFor(state, party));
   }
+}
+
+// Proposal loop: the host accepts or rejects an agent's tentative plan. Accept
+// locks the top candidate as the agent's plan with human sign-off (AI ✓).
+// Reject clears it, remembers the table, and hands the reason back to the agent.
+export function acceptAgentPlan(state, partyId, options = {}) {
+  const party = getParty(state, partyId);
+  if (!party) return failure(state, "PARTY_NOT_FOUND", `Party ${partyId} was not found.`);
+  if (party.candidateState !== "tentative" || !party.candidateTableIds.length) {
+    return failure(state, "NO_AGENT_PLAN", `${party.name} has no tentative agent plan to accept.`);
+  }
+  const tableId = party.candidateTableIds[0];
+  if (party.status === "waiting") {
+    // Seat first so a blocked accept (reservation priority, legality) records nothing.
+    const approved = { source: "agent", origin: approvedOrigin(state), reasonSupplied: party.candidateReasonSupplied, reason: party.candidateReason };
+    const result = assignTable(state, party.id, tableId, approved);
+    if (!result.ok) return result;
+    party.planApproved = true;
+    recordHostDecision(state, party, "accepted", tableId, { previousTableId: tableId, reason: options.reason });
+    logActivity(state, "accept_plan", `${party.name} → ${tableId} · AI plan approved`, "host");
+    return success(state, { partyId, tableId, seated: result.seated, approved: true });
+  }
+  recordHostDecision(state, party, "accepted", tableId, { previousTableId: tableId, reason: options.reason });
+  party.planApproved = true;
+  party.candidateState = "approved";
+  party.hostOverrideTableId = tableId;
+  recordChange(state, "plan", { partyId: party.id, tableId, by: "HOST", detail: `${party.name}: agent plan ${tableId} accepted` });
+  logActivity(state, "accept_plan", `${party.name} → ${tableId} · AI plan approved`, "host");
+  requestAgentReview(state, "host accepted a plan");
+  return success(state, { partyId, tableId, seated: false, approved: true });
+}
+
+export function rejectAgentPlan(state, partyId, reason = "", options = {}) {
+  const party = getParty(state, partyId);
+  if (!party) return failure(state, "PARTY_NOT_FOUND", `Party ${partyId} was not found.`);
+  if (party.candidateState !== "tentative" || !party.candidateTableIds.length) {
+    return failure(state, "NO_AGENT_PLAN", `${party.name} has no tentative agent plan to reject.`);
+  }
+  const tableId = party.candidateTableIds[0];
+  const cleanReason = String(reason || "").trim().slice(0, 160) || null;
+  if (!party.rejectedTables.includes(tableId)) party.rejectedTables.push(tableId);
+  clearCandidatePlan(party);
+  party.hostOverrideTableId = null;
+  recordHostDecision(state, party, "rejected", tableId, { previousTableId: tableId, reason: cleanReason });
+  recordChange(state, "plan", { partyId: party.id, tableId, by: "HOST", detail: `${party.name}: agent plan ${tableId} rejected${cleanReason ? ` · ${cleanReason}` : ""}` });
+  logActivity(state, "reject_plan", `${party.name} ✕ ${tableId}${cleanReason ? ` · ${cleanReason}` : ""}`, "host");
+  requestAgentReview(state, "host rejected a plan");
+  return success(state, { partyId, tableId, reason: cleanReason, rejectedTables: [...party.rejectedTables] });
 }
 
 function assignmentOriginFor(state, source, preservedOrigin = null) {
@@ -701,6 +762,13 @@ export function setCandidates(state, partyId, tableIds, autoAssignAt = null, opt
   const source = options.source || "agent";
   if (party.hostOverrideTableId && source !== "host" && uniqueIds[0] !== party.hostOverrideTableId) {
     return failure(state, "HOST_OVERRIDE_ACTIVE", `${party.name} is host-locked to ${party.hostOverrideTableId}.`);
+  }
+  if (source !== "host" && party.rejectedTables.includes(uniqueIds[0])) {
+    const rejection = [...state.hostDecisions].reverse().find((decision) => decision.partyId === party.id && decision.action === "rejected" && decision.tableId === uniqueIds[0]);
+    return failure(state, "INVALID_INPUT", `The host rejected ${uniqueIds[0]} for ${party.name}${rejection?.reason ? `: “${rejection.reason}”` : "."} Propose a different table.`, {
+      rejectedTables: [...party.rejectedTables],
+      hostReason: rejection?.reason || null
+    });
   }
   const illegal = uniqueIds
     .map((tableId) => ({ tableId, result: checkAssignmentLegality(state, partyId, tableId, { forCandidate: true, allowUpcoming: true, source }) }))
@@ -1759,6 +1827,13 @@ export function getFloorSnapshot(state) {
     minute: state.now,
     floorVersion: state.floorVersion,
     recentChanges: state.changeLog.slice(-10),
+    recentHostDecisions: state.hostDecisions.slice(-20).map((decision) => ({
+      partyId: decision.partyId,
+      action: decision.action,
+      tableId: decision.tableId,
+      reason: decision.reason,
+      at: decision.at
+    })),
     running: state.running,
     speed: state.speed,
     runCode: state.runCode,
@@ -1879,6 +1954,8 @@ function queueParty(state) {
     candidateUpdatedAt: party.candidateUpdatedAt,
     candidateFrozen: party.candidateFrozen,
     candidateReason: party.candidateReason,
+    planApproved: party.planApproved,
+    rejectedTables: [...party.rejectedTables],
     hostOverrideTableId: party.hostOverrideTableId,
     insidePlanningHorizon: isInsidePlanningHorizon(state, party),
     committedTableId: party.committedTableId,
