@@ -925,7 +925,7 @@ function render() {
   const planLabel = agentAttached ? state.agentConnection.name : "Manual host";
   const modeLabel = agentAttached ? `Agent: ${state.agentConnection.name}` : "Manual host";
   const planText = state.controllerMode === "manual"
-    ? "No agent attached yet. The engine enforces every rule; a browser agent makes the judgment calls. Press Start and seat arrivals by dragging, or press Connect AI to hand the night to an agent."
+    ? "No agent yet. The engine enforces the rules; a browser agent makes the judgment calls. Press Start and drag arrivals onto tables, or press Connect AI."
     : state.plan;
   const hostGuidance = state.controllerMode === "manual"
     ? "Manual · seat arrivals by hand."
