@@ -968,7 +968,7 @@ function render() {
               <i aria-hidden="true"></i>
               <span>${escapeHtml(modeLabel)}</span>
             </button>
-            <button class="control agent-connect-control" type="button" data-action="open-agent-panel" data-focus-key="agent-connect">${state.agentConnection ? "Agent" : "Connect AI"}</button>
+            <button class="control agent-connect-control" type="button" data-action="open-agent-panel" data-focus-key="agent-connect">${state.agentConnection ? "Agent panel" : "Connect AI"}</button>
             <button class="control reset-control" type="button" data-action="reset-night" data-focus-key="reset-night" title="Clear the floor and generate a different service scenario">New run</button>
             ${state.now >= SERVICE_END ? '<button class="control" type="button" data-action="open-recap" data-focus-key="open-recap">Review score</button>' : ""}
             <button class="command-trigger" type="button" data-action="open-palette" data-focus-key="command-trigger" aria-label="Open service commands">
