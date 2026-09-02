@@ -3438,3 +3438,32 @@ svg {
     inset-inline-start: var(--space-xs);
   }
 }
+
+/* Party cards show their whole story: preference chips wrap instead of
+   clipping, and a special request runs up to four lines before it trims. */
+.party-row__meta {
+  align-items: start;
+}
+
+.preference-list {
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: var(--space-2xs);
+}
+
+.request-note {
+  align-items: start;
+}
+
+.request-note > span {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-height: 1.35;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.request-note .request-badge {
+  margin-block-start: 0.15em;
+}

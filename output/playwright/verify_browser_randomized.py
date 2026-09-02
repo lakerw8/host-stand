@@ -86,7 +86,12 @@ def main():
         assert "120 seats · 33 tables" in page.locator(".brand-lockup").inner_text()
         assert page.locator(".party-row").count() >= 8
         party_heights = page.locator(".party-row").evaluate_all("rows => rows.map(row => row.getBoundingClientRect().height)")
-        assert max(party_heights) <= 100, party_heights
+        assert max(party_heights) <= 190, party_heights
+        clipped_chips = page.evaluate("""() => [...document.querySelectorAll('.party-row .preference-list')].flatMap(list => {
+          const bounds = list.getBoundingClientRect();
+          return [...list.querySelectorAll('.preference-chip')].filter(chip => chip.getBoundingClientRect().right > bounds.right + 1 || chip.scrollWidth > chip.clientWidth + 1).map(chip => chip.textContent);
+        })""")
+        assert clipped_chips == [], f"preference chips clipped: {clipped_chips}"
         assert page.locator(".queue-section").count() == 1
         assert page.locator(".queue-section h2").inner_text() == "Upcoming parties"
         assert page.locator(".party-source--reservation").count() >= 8
