@@ -3410,6 +3410,15 @@ svg {
   }
 }
 
+@media (max-height: 50rem) {
+  /* A round table that spans one row is only as wide as it is tall here; let it
+     become a pill so its seat count and status stay readable. */
+  .table-node--round {
+    aspect-ratio: auto;
+    width: 100%;
+  }
+}
+
 @media (max-height: 48rem) {
   .table-id {
     font-size: 0.75rem;
