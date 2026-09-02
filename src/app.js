@@ -546,8 +546,8 @@ function candidateButtons(party) {
     return `<span class="assignment-state assignment-state--committed">${icon("check")} ${escapeHtml(party.committedTableId)}</span>`;
   }
   if (party.status === "upcoming") {
-    if (state.controllerMode === "manual") return '<span class="candidate-empty">Manual · assign at arrival</span>';
-    if (!party.candidateTableIds.length) return '<span class="candidate-empty">Awaiting whole-night plan…</span>';
+    if (state.controllerMode === "manual") return '<span class="candidate-empty">Assign at arrival</span>';
+    if (!party.candidateTableIds.length) return '<span class="candidate-empty">Awaiting agent plan…</span>';
     return party.candidateTableIds.map((tableId, index) => `
       <button
         type="button"
@@ -563,7 +563,7 @@ function candidateButtons(party) {
   if (party.status !== "waiting") return "";
   if (!party.candidateTableIds.length) {
     if (state.controllerMode === "external") return '<span class="candidate-empty">Waiting for agent…</span>';
-    return '<span class="candidate-empty">Drag to any legal table</span>';
+    return '<span class="candidate-empty">Drag onto a table</span>';
   }
   return party.candidateTableIds.map((tableId, index) => `
     <button
@@ -584,7 +584,7 @@ function candidateStateLabel(party) {
   if (party.hostOverrideTableId) return "Host override";
   if (getReservationPriorityBlocker(state, party)) return "After reservation";
   if (party.candidateState === "tentative") return party.candidateFrozen ? "AI plan · locked" : "AI plan";
-  return party.status === "waiting" ? "Seat now" : "Potential";
+  return party.status === "waiting" ? "Arrived" : "";
 }
 
 function partyTiming(party) {
@@ -597,7 +597,7 @@ function partyTiming(party) {
   const origin = party.source === "walk_in" ? party.arrivedAt : party.reservedFor;
   const waited = Math.max(0, state.now - origin);
   if (state.controllerMode === "manual") return `${waited}m wait · manual`;
-  if (getReservationPriorityBlocker(state, party)) return `${waited}m wait · res first`;
+  if (getReservationPriorityBlocker(state, party)) return `${waited}m wait · after reservation`;
   if (party.autoAssignAt == null) return `${waited}m wait`;
   return `${waited}m wait · agent ${Math.max(0, party.autoAssignAt - state.now)}m`;
 }
