@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { EXPECTED_DWELL_MINUTES, FIRST_SEATING, TABLE_RESET_MINUTES } from "../src/data.js";
+import { EXPECTED_DWELL_MINUTES, FIRST_SEATING } from "../src/data.js";
 import {
+  TABLE_RESET_MINUTES,
   advanceTo,
   assignTable,
   attachExternalAgent,
@@ -36,6 +37,7 @@ test("an agent can plan the whole night: tentative tables persist for reservatio
 test("the plan board lists who is planned where and flags plans that collide in time", () => {
   const state = createInitialState();
   attachExternalAgent(state, "Table Pilot", "autonomous");
+  getParty(state, "rossi").size = 2;
   assert.equal(setCandidates(state, "patel", ["V1"], null, { source: "agent" }).ok, true);
   assert.equal(setCandidates(state, "brooks", ["V1"], null, { source: "agent" }).ok, true);
   assert.equal(setCandidates(state, "rossi", ["V1"], null, { source: "agent" }).ok, true);

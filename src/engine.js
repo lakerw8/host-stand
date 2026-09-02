@@ -1838,23 +1838,23 @@ export function getPlanBoard(state) {
   for (const [tableId, entries] of byTable) {
     entries.sort((left, right) => left.startsAt - right.startsAt);
     const table = getTable(state, tableId);
-    const occupiedUntil = table?.status === "seated" && table.dueAt != null ? table.dueAt + TABLE_RESET_MINUTES : null;
-    for (let index = 0; index < entries.length; index += 1) {
-      const entry = entries[index];
-      const previous = index > 0 ? entries[index - 1] : null;
-      const blockedBy = previous && entry.startsAt < previous.expectedFinishAt + TABLE_RESET_MINUTES
-        ? previous.partyId
-        : occupiedUntil != null && entry.startsAt < occupiedUntil ? table.partyId : null;
-      if (blockedBy) {
+    // Walk the effective schedule: a plan that collides does not itself block later plans.
+    let freeAt = table?.status === "seated" && table.dueAt != null ? table.dueAt + TABLE_RESET_MINUTES : -Infinity;
+    let holder = table?.status === "seated" ? table.partyId : null;
+    for (const entry of entries) {
+      if (entry.startsAt < freeAt) {
         conflicts.push({
           tableId,
           partyId: entry.partyId,
           partyName: entry.partyName,
           startsAt: entry.startsAt,
-          blockedBy,
-          detail: `${entry.partyName} is planned for ${tableId} at ${minutesToTime(entry.startsAt)} but ${getParty(state, blockedBy)?.name || blockedBy} is expected there until ${minutesToTime(previous ? previous.expectedFinishAt + TABLE_RESET_MINUTES : occupiedUntil)}`
+          blockedBy: holder,
+          detail: `${entry.partyName} is planned for ${tableId} at ${minutesToTime(entry.startsAt)} but ${getParty(state, holder)?.name || holder} is expected there until ${minutesToTime(freeAt)}`
         });
+        continue;
       }
+      freeAt = entry.expectedFinishAt + TABLE_RESET_MINUTES;
+      holder = entry.partyId;
     }
   }
   return { byTable, conflicts };

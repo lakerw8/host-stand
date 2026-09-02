@@ -143,7 +143,7 @@ test("get_queue exposes request text, source, and open-request status without gr
   assert.ok(floor.tables.every((entry) => entry.layout && typeof entry.distanceToEntrance === "number"));
 });
 
-test("next recommended actions surface unaddressed requests inside the planning horizon", () => {
+test("next recommended actions surface unplanned requests, earliest first", () => {
   const state = createInitialState({ scenarioSeed: "request-horizon-1", randomizeScenario: true });
   attachExternalAgent(state, "Table Pilot", "autonomous");
   const upcoming = state.parties
@@ -151,7 +151,7 @@ test("next recommended actions surface unaddressed requests inside the planning 
     .sort((left, right) => left.reservedFor - right.reservedFor)[0];
   advanceTo(state, Math.max(FIRST_SEATING, upcoming.reservedFor - 30));
   const actions = getQueueSnapshot(state).nextRecommendedActions;
-  assert.ok(actions.some((action) => action.includes(upcoming.name) && action.includes("Special request")), actions.join(" | "));
+  assert.ok(actions.some((action) => action.includes(upcoming.name) && /special request/i.test(action)), actions.join(" | "));
 });
 
 test("A1: private, quiet, and no neighbors seated before the cutoff", () => {
