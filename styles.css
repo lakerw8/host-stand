@@ -2358,9 +2358,11 @@ svg {
 
 .service-layout {
   align-items: start;
+  /* Stacked (phone and tablet): the floor comes first so it is one scroll away,
+     not sixty party cards away. Desktop puts the queue beside the floor. */
   grid-template-areas:
-    "queue"
-    "floor";
+    "floor"
+    "queue";
 }
 
 .queue-rail {
