@@ -287,10 +287,14 @@ function captureAgentAssignment() {
   };
 }
 
+const MAX_FLIGHT_MARKERS = 2;
+
 function animateAgentAssignment(transition) {
   if (!transition || globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
   const target = root.querySelector(`.table-node[data-table-id="${CSS.escape(transition.tableId)}"]`);
   if (!target) return;
+  // A tool loop can seat dozens of parties in a second; keep the floor legible.
+  if (document.querySelectorAll(".assignment-flight").length >= MAX_FLIGHT_MARKERS) return;
   document.body.dataset.lastAgentMove = `${transition.party.id}:${transition.tableId}`;
   const destination = target.getBoundingClientRect();
   const marker = document.createElement("div");
@@ -346,6 +350,7 @@ function resetNight(runCode = null) {
   });
   if (previousController === "external" && previousConnection) {
     fresh.controllerMode = "external";
+    fresh.agentEverAttached = true;
     fresh.agentConnection = { ...previousConnection, attachedAt: fresh.now, lastSeenAt: fresh.now };
     fresh.agentReview = {
       status: "review_due",

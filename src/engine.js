@@ -1440,7 +1440,7 @@ export function getServiceRecap(state) {
       kind,
       owner,
       label,
-      present: kind === "host" ? true : state.agentEverAttached,
+      present: kind === "host" ? true : Boolean(state.agentEverAttached || ownerRecords.length),
       specialRequests: {
         satisfied: graded.filter((outcome) => outcome.satisfied).length,
         total: graded.length,

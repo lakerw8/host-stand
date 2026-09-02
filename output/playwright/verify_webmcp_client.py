@@ -52,13 +52,16 @@ MODEL_CONTEXT_POLYFILL = r"""
     }
   }
 
-  Object.defineProperty(document, 'modelContext', {
+  const target = window.__HOST_STAND_POLYFILL_TARGET__ || 'document';
+  Object.defineProperty(target === 'navigator' ? navigator : document, 'modelContext', {
     configurable: true,
     enumerable: true,
     value: new TestModelContext()
   });
 })();
 """
+
+NAVIGATOR_ONLY = "window.__HOST_STAND_POLYFILL_TARGET__ = 'navigator';"
 
 
 def main():
@@ -72,7 +75,7 @@ def main():
         response = page.goto(URL, wait_until="domcontentloaded")
         assert response is not None
         assert response.headers.get("origin-agent-cluster") == "?1"
-        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 20")
+        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 21")
 
         result = page.evaluate(r"""async () => {
           const status = await window.__HOST_STAND_WEBMCP_READY__;
@@ -90,6 +93,7 @@ def main():
           const attached = await invoke('attach_agent', { agent_name: 'WebMCP Test Agent', mode: 'autonomous' });
           const queue = await invoke('get_queue');
           const party = queue.payload.reservations[0];
+          const stale = await invoke('lock_table', { table_id: 'P2', reason: 'Stale write probe', expected_version: Math.max(0, queue.payload.floorVersion - 1) });
           await invoke('mark_party', { party_id: party.id, status: 'arrived' });
           const scores = await Promise.all(initial.payload.tables.map(async table => ({
             table,
@@ -115,6 +119,11 @@ def main():
             names: tools.map((tool) => tool.name),
             allSchemasAreObjects: tools.every((tool) => tool.inputSchema?.type === 'object'),
             readOnlyCount: tools.filter((tool) => tool.annotations?.readOnlyHint).length,
+            untrustedCount: tools.filter((tool) => tool.annotations?.untrustedContentHint).length,
+            writeToolsAcceptVersion: tools.filter((tool) => !tool.annotations?.readOnlyHint).every((tool) => 'expected_version' in tool.inputSchema.properties),
+            openRequests: queue.payload.openRequests.length,
+            floorVersion: initial.payload.floorVersion,
+            stale: { isError: stale.toolResult.isError, code: stale.payload.error?.code, changes: stale.payload.error?.changes?.length },
             initialTables: initial.payload.tables.length,
             initialCapacity: initial.payload.capacity,
             attached: attached.payload,
@@ -130,10 +139,16 @@ def main():
         }""")
 
         assert result["status"]["supported"] is True
-        assert result["status"]["registered"] == 20
+        assert result["status"]["registered"] == 21
+        assert result["status"]["entryPoint"] == "document"
         assert result["names"] == sorted(result["names"])
         assert result["allSchemasAreObjects"] is True
         assert result["readOnlyCount"] == 3
+        assert result["untrustedCount"] == 2
+        assert result["writeToolsAcceptVersion"] is True
+        assert 8 <= result["openRequests"] <= 10
+        assert isinstance(result["floorVersion"], int)
+        assert result["stale"] == {"isError": True, "code": "STALE_STATE", "changes": 1}
         assert result["initialTables"] == 33
         assert result["initialCapacity"] == 120
         assert result["attached"]["ok"] is True
@@ -147,8 +162,28 @@ def main():
         assert result["aborted"]["isError"] is True
         assert result["aborted"]["payload"]["error"]["code"] == "ABORTED"
         assert result["reset"] == {"clock": "5:00 PM", "running": False, "runChanged": True, "controllerMode": "external", "agentName": "WebMCP Test Agent"}
-        assert "WebMCP Test Agent attached" in page.locator(".mcp-status").inner_text()
+        assert "WebMCP Test Agent attached" in page.locator(".simulation-console__details .mcp-status").inner_text()
+        assert "WebMCP: 21 tools · document" in page.locator(".mcp-status--strip").inner_text()
         assert console_errors == [], f"browser console errors: {console_errors}"
+        browser.close()
+
+    navigator_console_errors = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=CHROME, headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.add_init_script(NAVIGATOR_ONLY)
+        page.add_init_script(MODEL_CONTEXT_POLYFILL)
+        page.on("console", lambda message: navigator_console_errors.append(message.text) if message.type == "error" else None)
+        page.on("pageerror", lambda error: navigator_console_errors.append(str(error)))
+        page.goto(URL, wait_until="domcontentloaded")
+        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 21")
+        navigator_status = page.evaluate("() => window.__HOST_STAND_WEBMCP_STATUS__")
+        assert navigator_status["entryPoint"] == "navigator", navigator_status
+        assert navigator_status["supported"] is True
+        assert page.evaluate("typeof document.modelContext") == "undefined"
+        assert page.evaluate("async () => (await navigator.modelContext.getTools()).length") == 21
+        assert "WebMCP: 21 tools · navigator" in page.locator(".mcp-status--strip").inner_text()
+        assert navigator_console_errors == [], f"navigator fallback console errors: {navigator_console_errors}"
         browser.close()
 
     native_console_errors = []
@@ -163,7 +198,9 @@ def main():
         page.on("pageerror", lambda error: native_console_errors.append(str(error)))
         page.goto(URL, wait_until="domcontentloaded")
         assert page.evaluate("typeof document.modelContext?.registerTool") == "function"
-        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 20")
+        page.wait_for_function("window.__HOST_STAND_WEBMCP_STATUS__?.registered === 21")
+        native_status = page.evaluate("() => window.__HOST_STAND_WEBMCP_STATUS__")
+        native_version = page.evaluate("() => navigator.userAgent")
 
         native_result = page.evaluate(r"""async () => {
           const tools = await document.modelContext.getTools();
@@ -200,7 +237,8 @@ def main():
           };
         }""")
 
-        assert native_result["count"] == 20
+        assert native_result["count"] == 21
+        assert native_status["entryPoint"] in ("document", "navigator")
         assert native_result["names"] == sorted(native_result["names"])
         assert native_result["readOnlyCount"] == 3
         assert native_result["tables"] == 33
@@ -214,10 +252,12 @@ def main():
         browser.close()
 
     print("PASS · Origin-Agent-Cluster enables an origin-isolated WebMCP document")
-    print("PASS · Chrome 151's native WebMCP API registers, discovers, and executes all tools")
-    print("PASS · an independent client discovers 20 sorted tools through getTools()")
-    print("PASS · schemas and current readOnlyHint annotations survive discovery")
+    print(f"PASS · native WebMCP registers all 21 tools via {native_status['entryPoint']}.modelContext ({native_version})")
+    print("PASS · registration falls back to navigator.modelContext when document.modelContext is absent")
+    print("PASS · an independent client discovers 21 sorted tools through getTools()")
+    print("PASS · schemas, readOnlyHint, untrustedContentHint, and expected_version survive discovery")
     print("PASS · executeTool() reads, scores, writes, and verifies shared page state")
+    print("PASS · a stale expected_version returns STALE_STATE with the missed change")
     print("PASS · malformed and cancelled calls return structured agent-readable errors")
     print("PASS · explicit agent attachment survives a human-created random reset")
     print("PASS · no browser console or page errors")
