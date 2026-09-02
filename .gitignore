@@ -27,3 +27,5 @@ AGENTS.md
 
 # Claude Code local launch config
 .claude/
+__pycache__/
+*.pyc
