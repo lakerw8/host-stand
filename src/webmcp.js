@@ -128,7 +128,7 @@ export function createToolDefinitions({ state, clock, onChange }) {
       inputSchema: objectSchema(
         {
           agent_name: { type: "string", minLength: 1, maxLength: 64, description: "Visible name for the connected AI agent." },
-          mode: { type: "string", enum: ["advisory", "autonomous"], description: "Advisory posts plans only; autonomous may use candidate auto-assignment deadlines." }
+          mode: { type: "string", enum: ["advisory", "autonomous"], description: "Kept for compatibility and shown in the UI. Plans execute at arrival in either mode; the host can Accept, Reject, or override any plan before then." }
         },
         ["agent_name"]
       ),
@@ -175,7 +175,7 @@ export function createToolDefinitions({ state, clock, onChange }) {
     },
     {
       name: "set_candidates",
-      description: "Post one to three ranked legal candidate tables plus a concise whole-floor reason for an upcoming reservation or waiting party, at any time of night. Special requests are natural language. Interpret intent; the floor grades outcomes. Include how your plan honors the request in `reason`. Plan the whole night so scarce tables are protected for later requests, and re-post freely when the floor changes; plans are tentative. Plan waiting reservations before walk-ins. The first table is tentative and becomes the autonomous assignment at arrival or after the five-minute host-override window, but walk-in commitment pauses while a waiting reservation has a legal available table. A host override, an accepted plan, and a rejected table are fixed.",
+      description: "Post one to three ranked legal candidate tables plus a concise whole-floor reason for an upcoming reservation or waiting party, at any time of night. Special requests are natural language. Interpret intent; the floor grades outcomes. Include how your plan honors the request in `reason`. Plan the whole night so scarce tables are protected for later requests, and re-post freely when the floor changes; plans are tentative. Plan waiting reservations before walk-ins. The first table is tentative and executes at arrival (or after the five-minute host-override window for a waiting party); if it is no longer legal then, the engine tries your next-ranked table. Walk-in commitment pauses while a waiting reservation has a legal available table. A host override, an accepted plan, and a rejected table are fixed.",
       inputSchema: objectSchema(
         {
           party_id: stringId("Upcoming reservation or waiting party id."),

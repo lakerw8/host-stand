@@ -23,7 +23,7 @@ What `DEMOAAFT` guarantees before 7:30 PM:
 
 Run the demo in the ChatGPT desktop app's built-in browser. That is what the judges use, and it is where we verified registration (app 26.825.51511, see `output/playwright/webmcp-browser-verification.md`). Chrome with the WebMCP flag proves the tools register, but it has no agent that can call them.
 
-1. Open the ChatGPT desktop app and start a **New chat**. Pick **GPT-5.6 Sol** at High reasoning. Terra also works; Luna has site tools switched off. If your chat sits inside the Host Stand repo project, add "don't run shell commands or edit files" to your prompts so it stays in the browser.
+1. Open the ChatGPT desktop app and start a **New chat**. Pick **GPT-5.6 Sol** at High reasoning. Terra also works; Luna has site tools switched off. The attach mode no longer matters: plans execute at arrival either way. If your chat sits inside the Host Stand repo project, add "don't run shell commands or edit files" to your prompts so it stays in the browser.
 2. Open the built-in browser: toggle the right side panel (⌥⌘B), choose **Browser** (⌘T), and go to `https://host-stand-nine.vercel.app/?run=DEMOAAFT`. The small label under the header should read `WebMCP: 22 tools · document`.
 3. Do the manual beat first (see 0:40 below) and record it, or record it separately, before the agent is attached. Once the agent is attached the run stays in agent mode.
 4. Then, with the recording paused, press **Connect AI** on the page and copy the prompt. Paste it into the chat's "Do anything" box as is: it already asks for the whole-night `set_plan` pass, tells the agent you will say *next* when the floor has moved, and asks it to name the special request in every reason.

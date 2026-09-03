@@ -205,13 +205,40 @@ test("an autonomous agent's tentative tables commit when the reservations arrive
   assert.deepEqual(getTable(state, "V1").assignmentOrigin, { kind: "external", label: "Table Pilot" });
 });
 
-test("an advisory agent's tentative tables wait for the host instead of executing", () => {
+test("plans execute at arrival in advisory mode too; the mode no longer gates execution", () => {
   const state = createInitialState();
   attachExternalAgent(state, "Advisor", "advisory");
   assert.equal(setCandidates(state, "patel", ["V1"], null, { source: "agent" }).ok, true);
   advanceTo(state, FIRST_SEATING);
-  assert.equal(getParty(state, "patel").status, "waiting");
-  assert.deepEqual(getParty(state, "patel").candidateTableIds, ["V1"]);
+  assert.equal(getParty(state, "patel").status, "seated");
+  assert.equal(getParty(state, "patel").committedTableId, "V1");
+  assert.equal(getTable(state, "V1").assignmentOrigin.kind, "external");
+});
+
+test("a plan falls back to the agent's next-ranked table when the first is no longer legal at arrival", () => {
+  const state = createInitialState();
+  attachExternalAgent(state, "Table Pilot", "autonomous");
+  assert.equal(setCandidates(state, "patel", ["V1", "V2", "D2"], null, { source: "agent", reason: "Window, else a two-top." }).ok, true);
+  lockTable(state, "V1", "Broken chair", { source: "host" });
+  advanceTo(state, FIRST_SEATING);
+  assert.equal(getParty(state, "patel").status, "seated");
+  assert.equal(getParty(state, "patel").committedTableId, "V2");
+  assert.equal(getTable(state, "V1").partyId, null);
+});
+
+test("when no planned table is legal at arrival the ledger says so and the agent is asked to review", () => {
+  const state = createInitialState();
+  attachExternalAgent(state, "Table Pilot", "autonomous");
+  assert.equal(setCandidates(state, "patel", ["V1"], null, { source: "agent" }).ok, true);
+  lockTable(state, "V1", "Broken chair", { source: "host" });
+  state.agentReview.status = "planned";
+  advanceTo(state, FIRST_SEATING);
+  const patel = getParty(state, "patel");
+  assert.equal(patel.status, "waiting");
+  assert.equal(patel.autoAssignAt, null, "the deadline is cleared so the engine does not retry every minute");
+  assert.deepEqual(patel.candidateTableIds, ["V1"], "the plan stays visible for the host and the agent");
+  assert.ok(state.activity.some((entry) => entry.tool === "plan" && entry.detail.includes("Patel: planned V1 not possible")), state.activity.map((entry) => entry.detail).join(" | "));
+  assert.equal(state.agentReview.status, "review_due");
 });
 
 test("an arrived walk-in in manual mode waits for the host with no suggestions", () => {

@@ -923,6 +923,12 @@ svg {
   opacity: 1;
 }
 
+.table-status--planned {
+  color: var(--color-accent);
+  font-weight: 700;
+  opacity: 1;
+}
+
 .candidate-rank {
   align-items: center;
   background: var(--color-accent);

@@ -468,12 +468,14 @@ function isHostPlan(party) {
   return Boolean(party.hostOverrideTableId && party.candidateTableIds[0] === party.hostOverrideTableId);
 }
 
+// An attached agent's plans execute on their own: at arrival for an upcoming
+// reservation, after the host-override window for a waiting party. The host can
+// Accept, Reject, or drag a party elsewhere before then. The attach mode is kept
+// for compatibility and shown in the UI, but it no longer gates execution.
 function agentMayAutoCommit(state) {
-  return state.controllerMode === "external" && state.agentConnection?.mode === "autonomous";
+  return state.controllerMode === "external";
 }
 
-// A tentative plan executes at arrival when it is the host's own override or when an
-// autonomous agent published it. Advisory agents only propose.
 function scheduleArrivalCommit(state, party) {
   if (!party.candidateTableIds.length) return;
   if (party.planApproved || isHostPlan(party) || agentMayAutoCommit(state)) party.autoAssignAt = state.now;
@@ -498,7 +500,24 @@ function commitCandidateDeadlines(state) {
       return left.autoAssignAt - right.autoAssignAt;
     });
   for (const party of due) {
-    assignTable(state, party.id, party.candidateTableIds[0], commitOptionsFor(state, party));
+    // Try the agent's ranked tables in order; the first one that is still legal wins.
+    const options = commitOptionsFor(state, party);
+    const attempts = party.hostOverrideTableId || party.planApproved ? party.candidateTableIds.slice(0, 1) : party.candidateTableIds;
+    let seated = false;
+    let lastError = null;
+    for (const tableId of attempts) {
+      const result = assignTable(state, party.id, tableId, options);
+      if (result.ok) {
+        seated = true;
+        break;
+      }
+      lastError = result.error;
+    }
+    if (!seated) {
+      party.autoAssignAt = null;
+      logActivity(state, "plan", `${party.name}: planned ${attempts.join(" · ")} not possible · ${lastError?.message || "no legal table"}`, "system");
+      requestAgentReview(state, "planned table unavailable");
+    }
   }
 }
 
