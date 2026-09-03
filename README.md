@@ -2,7 +2,7 @@
 
 A restaurant host and a browser agent run one dining room together, through WebMCP. The engine enforces the rules, the agent makes the judgment calls, and at the end of the night both are graded, by name, on the same run.
 
-[Open the live demo](https://host-stand-nine.vercel.app) · [View the source](https://github.com/lakerw8/host-stand) · Built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/)
+[Open the live demo](https://host-stand-nine.vercel.app) · [Watch the demo](https://youtu.be/uuPk4ZxyYOA) · [View the source](https://github.com/lakerw8/host-stand) · Built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/)
 
 ![Host Stand: a browser agent's plan on the floor with Accept and Reject on the party card](./output/playwright/external-ai-assignment.png)
 
