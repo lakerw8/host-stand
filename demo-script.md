@@ -49,17 +49,17 @@ Run the demo in the ChatGPT desktop app's built-in browser. That is what the jud
 
 **Say:** "Out of the box it's manual, which is how most digital table planners work today: the software knows a four won't fit a two-top, and that's about all it knows. Notice the engine enforces capacity, accessibility, locks, and reservation priority for me exactly the way it will for the agent. Nothing seats itself."
 
-## 1:00–1:30 · The agent plans the whole night
+## 1:00–1:30 · The agent plans the whole night, and the floor follows
 
-**Show:** Resume the recording on the attached state. Point at **Agent: ChatGPT** in the header, the `set_plan` rows in the ledger, and the PLAN chips down the queue. Jump to 6:40, say **next**, and let one or two chips move.
+**Show:** Resume the recording on the attached state. Point at **Agent: ChatGPT** in the header, the `set_plan` rows in the ledger, the PLAN chips down the queue, and the blue "6:00 Murphy"-style labels on the free tables. Press **Start** at 5× for a few seconds: watch the first arrivals seat themselves on their planned tables with `AI` labels, and the ledger fill with `assign_table` rows. Pause, jump to 6:40, say **next**, and let one or two labels move.
 
-**Say:** "Now ChatGPT is attached through WebMCP. It read the whole night in one go and planned every reservation, so a window four-top isn't spent on a couple with no preferences when an anniversary needs it at eight. It re-plans every ten minutes of service and after every event: a no-show, a kitchen delay, a note I type. Earlier suggestions can move. That's the point; the floor is a moving target."
+**Say:** "Now ChatGPT is attached through WebMCP. It read the whole night in one go and planned every reservation, so a window four-top isn't spent on a couple with no preferences when an anniversary needs it at eight. Every free table already shows who it's holding for. When a party arrives, the engine seats it on that table by itself; if the table is gone, it takes the agent's next choice. It re-plans every ten minutes of service and after every event: a no-show, a kitchen delay, a note I type. Earlier suggestions can move. That's the point; the floor is a moving target."
 
 ## 1:30–2:00 · Two requests, and the host's say
 
 **Show:** Select **Nakamura** and read the agent's reason for the V3 trade-off in the inspector. Select **Nelson** and read the reason for the booth by the door. Press **Accept** on one of them (`AI ✓`). Drag a different party to another table to show an override.
 
-**Say:** "Nakamura is the host's dilemma: the twenty-year regular and the anniversary both want V3. The agent picked, and it wrote down why; the floor will grade that explanation. Nelson's son is autistic and needs to see the door, so it chose a quiet booth near the entrance. I accept that one, so it carries my signature. And I can always drag a party somewhere else; that's counted as an override. Remember these two names."
+**Say:** "Nakamura is the host's dilemma: the twenty-year regular and the anniversary both want V3. The agent picked, and it wrote down why; the floor will grade that explanation. Nelson's son is autistic and needs to see the door, so it chose a quiet booth near the entrance. Both would seat themselves at arrival anyway; I accept Nelson's so it carries my signature. And I can always drag a party somewhere else; that's counted as an override. Remember these two names."
 
 ## 2:00–2:15 · The probe
 
@@ -80,7 +80,8 @@ End on the scorecard. Put the live URL and the repository link in the video desc
 - [ ] Under three minutes.
 - [ ] ChatGPT desktop app, built-in browser, GPT-5.6 Sol, run code `DEMOAAFT` visible in the footer.
 - [ ] Manual beat recorded before the agent is attached.
-- [ ] The setup turn (attach and `set_plan`) done off camera, with PLAN chips on the cards when recording resumes.
+- [ ] The setup turn (attach and `set_plan`) done off camera, with PLAN chips on the cards and planned-party labels on the free tables when recording resumes.
+- [ ] A few seconds of the clock running so arrivals seat themselves on their planned tables on camera.
 - [ ] Two special requests read on camera with the agent's reasons; the same two found in the recap.
 - [ ] Accept (`AI ✓`) and one drag override, so the Host column is not empty.
 - [ ] The injection probe blocked.

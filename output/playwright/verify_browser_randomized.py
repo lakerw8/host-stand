@@ -345,17 +345,21 @@ def main():
         proposals = page.evaluate("""async () => {
           const queue = await window.hostStandInvokeTool('get_queue', {});
           const picked = [];
+          const plans = [];
           for (const party of queue.reservations.filter(candidate => candidate.status === 'upcoming' && !candidate.hostOverrideTableId)) {
             const ranked = await window.hostStandInvokeTool('score_assignment', {party_id: party.id});
             const free = ranked.ranked.filter(entry => entry.availabilityDelay === 0 && !picked.some(item => item.tableId === entry.tableId));
             if (!free.length) continue;
-            const plan = await window.hostStandInvokeTool('set_candidates', {party_id: party.id, table_ids: [free[0].tableId], reason: `Honors the request: ${free[0].reasons[0]}`});
-            if (plan.ok) picked.push({partyId: party.id, tableId: free[0].tableId});
-            if (picked.length === 2) break;
+            picked.push({partyId: party.id, tableId: free[0].tableId});
+            plans.push({party_id: party.id, table_ids: free.slice(0, 2).map(entry => entry.tableId), reason: `Honors the request: ${free[0].reasons[0]}`});
+            if (plans.length === 14) break;
           }
-          return picked;
+          const batch = await window.hostStandInvokeTool('set_plan', {plans});
+          if (!batch.ok) throw new Error(batch.error.message);
+          return picked.filter(item => batch.results.find(result => result.partyId === item.partyId && result.ok));
         }""")
-        assert len(proposals) == 2, proposals
+        assert len(proposals) >= 2, proposals
+        assert page.locator(".table-status--planned").count() >= 2, "free tables should show who is planned next"
         accept_row = page.locator(f'.party-row[data-party-id="{proposals[0]["partyId"]}"]')
         reject_row = page.locator(f'.party-row[data-party-id="{proposals[1]["partyId"]}"]')
         assert accept_row.locator('[data-action="accept-plan"]').count() == 1
